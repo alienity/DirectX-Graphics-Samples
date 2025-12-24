@@ -145,7 +145,7 @@ namespace VCT
         for (int i = 0; i < 6; ++i)
         {
             Vector3 eye = views[i].dir * 15.0f; // Ïà»úÎ»ÖÃ
-            Matrix4 view = Matrix4::LookAt(eye, Vector3::Zero, views[i].up);
+            Math::Matrix4 view = Matrix4::LookAt(eye, Vector3::Zero, views[i].up);
             Matrix4 proj = Matrix4::Orthographic(20.0f, 20.0f, 0.1f, 30.0f);
             Matrix4 vp = proj * view;
 

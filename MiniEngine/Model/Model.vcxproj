@@ -95,10 +95,10 @@
   <ItemGroup>
     <None Include="packages.config" />
     <None Include="Shaders\Common.hlsli" />
+    <None Include="Shaders\VCTVoxelCommon.hlsli" />
     <None Include="Shaders\FillLightGridCS.hlsli" />
     <None Include="Shaders\LightGrid.hlsli" />
     <None Include="Shaders\Lighting.hlsli" />
-    <None Include="Shaders\VCTVoxelCommon.hlsli" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\CutoutDepthPS.hlsl">
@@ -175,9 +175,14 @@
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\VCTLightingPS.hlsl" />
+    <FxCompile Include="Shaders\VCTLightInjectionCS.hlsl" />
     <FxCompile Include="Shaders\VCTMipmapCS.hlsl" />
-    <FxCompile Include="Shaders\VCTVoxelizationPS.hlsl" />
-    <FxCompile Include="Shaders\VCTVoxelizationVS.hlsl" />
+    <FxCompile Include="Shaders\VCTVoxelizationVS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\VCTVoxelizationPS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+    </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

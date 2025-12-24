@@ -19,7 +19,8 @@ namespace VCT
 	void Shutdown(void);
 	void Render(ComputeContext& Context, bool bUsePreComputedLuma);
 
-	void Voxelize(CommandContext& context, const Model& model, const Math::Vector3& worldMin, float voxelSize);
+	void Voxelize(CommandContext& context, const Math::Vector3& worldMin, float voxelSize);
+	void LightInjection(CommandContext& context);
 	void GenerateMipmaps(CommandContext& context);
 
 	//==========================================================================
@@ -36,5 +37,7 @@ namespace VCT
 		std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> m_UAVs;
 		D3D12_CPU_DESCRIPTOR_HANDLE m_SRV;
 	};
+	//==========================================================================
+
 
 } // namespace VCT

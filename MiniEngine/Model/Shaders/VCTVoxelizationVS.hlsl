@@ -1,26 +1,39 @@
-// VoxelizationVS.hlsl
-#include "VCTVoxelCommon.hlsli"
+#define _RootSig \
+    "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
+    "CBV(b0), " \
+	"CBV(b1)"
 
-struct VS_INPUT
+cbuffer MeshConstants : register(b0)
 {
-    float3 pos : POSITION;
-    float3 color : COLOR;
+    float4x4 WorldMatrix; // Object to world
+    float3x3 WorldIT; // Object normal to world normal
 };
 
-struct VS_OUTPUT
+cbuffer GlobalConstants : register(b1)
+{
+    float4x4 ViewProjMatrix;
+}
+
+struct VSInput
+{
+    float3 pos : POSITION;
+    float3 normal : NORMAL;
+    float2 uv0 : TEXCOORD0;
+};
+
+struct VSOutput
 {
     float4 pos : SV_POSITION;
     float3 worldPos : WORLD_POS;
-    float3 color : COLOR;
+	float2 uv : TEXCOORD0;
 };
 
-ConstantBuffer<VoxelCB> g_CB : register(b0);
-
-VS_OUTPUT main(VS_INPUT input)
+[RootSignature(_RootSig)]
+VSOutput main(VSInput input)
 {
-    VS_OUTPUT output;
-    output.pos = mul(g_CB.ViewProj, float4(input.pos, 1.0f));
+    VSOutput output;
+    output.pos = mul(ViewProjMatrix, float4(input.pos, 1.0f));
     output.worldPos = input.pos;
-    output.color = input.color;
+    output.uv = input.uv0;
     return output;
 }
