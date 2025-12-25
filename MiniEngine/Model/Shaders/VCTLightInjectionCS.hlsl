@@ -1,3 +1,4 @@
+#include "Common.hlsli"
 #include "Lighting.hlsli"
 
 #define _RootSig \
@@ -5,90 +6,68 @@
     "CBV(b0), " \
 	"CBV(b1)"
 
-StructuredBuffer<LightData> lightBuffer : register(t14);
-Texture2DArray<float> lightShadowArrayTex : register(t15);
-ByteAddressBuffer lightGrid : register(t16);
-ByteAddressBuffer lightGridBitMask : register(t17);
-
 Texture3D<float4> voxelAlbedoVol : register(t0);
 Texture3D<float4> voxelNormalVol : register(t1);
 
-Texture2D<float> sunShadowMap : register(t2);
-SamplerComparisonState sunShadowCmp : register(s0);
+Texture2D<float> texShadow : register(t13);
 
 RWTexture3D<float4> voxelRadianceVol : register(u0);
 
-// 从MiniEngine光照系统获取光照数据
 cbuffer VolumeConstants : register(b0)
 {
-    float3 VolumeWorldMin;
-    float _Pad0;
-    float4x4 ShadowViewProj;
+    float4x4 worldToProjection;
+    float4x4 worldToShadow;
+    float3 viewDir;
+    uint _Pad0;
+    float3 viewerPos;
+    float voxelSize; // = 20 / 128
+    float3 voxelWorldMin; // [-10, -10, -10]
+    uint voxelRes; // = 128
 };
 
-// MiniEngine光照数据结构
-cbuffer PSConstants : register(b1)
+void ShadeLightsVCT(inout float3 colorSum, uint2 pixelPos,
+	float3 diffuseAlbedo, // Diffuse albedo
+	float3 normal,
+	float3 viewDir,
+	float3 worldPos
+	)
 {
-    float3 SunDirection;
-    float3 SunColor;
-    float3 AmbientColor;
-    float4 ShadowTexelSize;
-
-    float4 InvTileDim;
-    uint4 TileCount;
-    uint4 FirstLightIndex;
-
-    uint FrameIndexMod2;
-};
-
-// 从LightManager获取的光照数据
-StructuredBuffer<LightData> lightBuffer : register(t3);
-
-float SampleShadow(float3 worldPos, float3 lightDir)
-{
-    float4 shadowPos = mul(ShadowViewProj, float4(worldPos, 1.0f));
-    float3 shadowUV = shadowPos.xyz / shadowPos.w;
-    if (any(shadowUV < 0) || any(shadowUV > 1))
-        return 1.0f;
-    return sunShadowMap.SampleCmpLevelZero(sunShadowCmp, shadowUV.xy, shadowUV.z);
+    return ShadeLights(colorSum, pixelPos,
+		diffuseAlbedo,
+		float3(0, 0, 0),
+		0,
+		0,
+		normal,
+		viewDir,
+		worldPos
+		);
 }
 
-// 计算点光源对voxel的贡献
-float3 CalculatePointLightContribution(float3 worldPos, float3 normal, float3 albedo, LightData light)
+float3 VoxelIndexToWorld(uint3 idx)
 {
-    float3 toLight = light.pos - worldPos;
-    float dist = length(toLight);
-    if (dist > sqrt(light.radiusSq))
-        return 0;
-    
-    float3 lightDir = toLight / dist;
-    float NdotL = max(0, dot(normal, lightDir));
-    if (NdotL <= 0)
-        return 0;
-    
-    // 距离衰减
-    float attenuation = saturate(1.0f - (dist * dist) / light.radiusSq);
-    float3 lightContribution = NdotL * attenuation * light.color * albedo;
-    return lightContribution;
+    return voxelWorldMin + (idx + 0.5f) * voxelSize;
 }
 
-// 计算方向光对voxel的贡献
-float3 CalculateDirectionalLightContribution(float3 worldPos, float3 normal, float3 albedo, float3 dirLightDir, float3 dirLightColor)
+int3 WorldToVoxelIndex(float3 worldPos)
 {
-    float NdotL = max(0, dot(normal, -dirLightDir));
-    if (NdotL <= 0)
-        return 0;
-    
-    float shadow = SampleShadow(worldPos, -dirLightDir);
-    float3 lightContribution = NdotL * dirLightColor * albedo * shadow;
-    return lightContribution;
+    return int3((worldPos - voxelWorldMin) / voxelSize);
+}
+
+bool IsValidVoxelIndex(int3 idx)
+{
+    return all(idx >= 0) && all(idx < int(voxelRes));
+}
+
+float3 DecodeNormal(float3 n)
+{
+    return n * 2.0f - 1.0f; // [0,1] to [-1,1]
 }
 
 [RootSignature(_RootSig)]
 [numthreads(4, 4, 4)]
 void main(uint3 groupId : SV_GroupID, uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    if (any(dispatchThreadId >= g_VoxelRes))
+    if (any(dispatchThreadId >= voxelRes))
         return;
     
     float4 albedoData = voxelAlbedoVol[dispatchThreadId];
@@ -98,18 +77,50 @@ void main(uint3 groupId : SV_GroupID, uint3 dispatchThreadId : SV_DispatchThread
         return;
     }
 
-    float3 albedo = albedoData.rgb;
+    float3 diffuseAlbedo = albedoData.rgb;
     float3 worldPos = VoxelIndexToWorld(dispatchThreadId);
     
     float3 normal = DecodeNormal(voxelNormalVol[dispatchThreadId].rgb);
-    normal = normalize(normal); // 确保法线归一化
+    normal = normalize(normal);
     
+    float3 shadowCoord = mul(worldToShadow, float4(worldPos, 1.0)).xyz;
+
+    float3 colorSum = 0;
+    {
+        colorSum += ApplyAmbientLight(diffuseAlbedo, 1, AmbientColor);
+    }
+
+    float3 specularAlbedo = float3(0, 0, 0);
+    float specularMask = 0;
+    float3 tmpViewDir = normalize(viewDir);
+    colorSum += ApplyDirectionalLight(diffuseAlbedo, specularAlbedo, specularMask, 0, normal, tmpViewDir, SunDirection, SunColor, shadowCoord, texShadow);
+
+    ShadeLights(colorSum, pixelPos,
+		diffuseAlbedo,
+		specularAlbedo,
+		specularMask,
+		gloss,
+		normal,
+		viewDir,
+		vsOutput.worldPos
+		);
+
+
+
+
+
+
+
+
+
+
+
+
+
     float3 totalLight = 0;
     
-    // 添加环境光
     totalLight += AmbientColor * albedo;
     
-    // 计算方向光贡献
     float3 dirLightContribution = CalculateDirectionalLightContribution(worldPos, normal, albedo, SunDirection, SunColor);
     totalLight += dirLightContribution;
     

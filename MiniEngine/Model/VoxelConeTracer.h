@@ -15,6 +15,9 @@ namespace VCT
 	extern BoolVar Enable;
 	extern BoolVar DebugDraw;
 
+	extern NumVar VoxelSize;
+
+
 	void Initialize(void);
 	void Shutdown(void);
 	void Render(ComputeContext& Context, bool bUsePreComputedLuma);
