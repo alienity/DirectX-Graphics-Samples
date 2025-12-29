@@ -4,10 +4,47 @@
 #include "../Core/BufferManager.h"
 #include "../Core/CommandContext.h"
 
+#include "CompiledShaders/VCTVoxelizationVS.h"
+#include "CompiledShaders/VCTVoxelizationPS.h"
+#include "CompiledShaders/VCTLightInjectionCS.h"
+
+
 using namespace Graphics;
 
 namespace VCT
 {
+    BoolVar Enable("Graphics/VCT/Enable", true);
+    BoolVar DebugDraw("Graphics/VCT/DebugDraw", false);
+    NumVar VoxelSize("Graphics/VCT/Voxel Size", 20 / 128);
+	NumVar VoxelCount("Graphics/VCT/Voxel Resolution", 128);
+
+    RootSignature m_RootSig;
+    GraphicsPSO m_VoxelPSO(L"Renderer: Voxelization PSO"); // Not finalized.  Used as a template.
+
+    GraphicsPSO s_VCTVoxelizationVS(L"VCT: Voxelize VS");
+    GraphicsPSO s_VCTVoxelizationPS(L"VCT: Voxelize PS");
+
+	ComputePSO  s_VCTLightInjectionCS(L"DOF: Pass 1 CS");
+    ComputePSO  s_VCTGenMipmapCS(L"DOF: Pass 1 CS");
+
+    D3D12_RASTERIZER_DESC VoxelizationRasterizer;
+
+    D3D12_BLEND_DESC VoxelizationBlendDesc;
+
+    enum RootBindings
+    {
+        kMeshConstants,
+        kMaterialConstants,
+        kMaterialSRVs,
+        kMaterialSamplers,
+        kCommonSRVs,
+        kCommonCBV,
+        kCommoUAV,
+        kSkinMatrices,
+
+        kNumRootBindings
+    };
+
     void VoxelVolume::Create(uint32_t size, uint32_t mipLevels)
     {
         m_Size = size;
@@ -62,6 +99,70 @@ namespace VCT
 
     void VCT::Initialize(void)
     {
+        SamplerDesc DefaultSamplerDesc;
+        DefaultSamplerDesc.MaxAnisotropy = 8;
+
+        SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
+        //CubeMapSamplerDesc.MaxLOD = 6.0f;
+
+        m_RootSig.Reset(kNumRootBindings, 3);
+        m_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kMeshConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
+        m_RootSig[kMaterialConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kMaterialSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kMaterialSamplers].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
+        m_RootSig[kCommoUAV].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kSkinMatrices].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
+        m_RootSig.Finalize(L"VoxelRootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+        D3D12_INPUT_ELEMENT_DESC posAndUV[] =
+        {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        };
+
+        // Voxelization Rasterizer
+
+        VoxelizationRasterizer.FillMode = D3D12_FILL_MODE_SOLID;
+        VoxelizationRasterizer.CullMode = D3D12_CULL_MODE_NONE;
+        VoxelizationRasterizer.FrontCounterClockwise = TRUE;
+        VoxelizationRasterizer.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+        VoxelizationRasterizer.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+        VoxelizationRasterizer.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+        VoxelizationRasterizer.DepthClipEnable = FALSE;
+        VoxelizationRasterizer.MultisampleEnable = FALSE;
+        VoxelizationRasterizer.AntialiasedLineEnable = FALSE;
+        VoxelizationRasterizer.ForcedSampleCount = 0;
+        VoxelizationRasterizer.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON;
+
+        VoxelizationBlendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        VoxelizationBlendDesc.RenderTarget[0].BlendEnable = TRUE;
+        VoxelizationBlendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+        VoxelizationBlendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+        VoxelizationBlendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_MAX;
+        VoxelizationBlendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        VoxelizationBlendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
+        VoxelizationBlendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_MAX;
+        VoxelizationBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+
+        // Voxelization PSO
+
+        m_VoxelPSO.SetRootSignature(m_RootSig);
+        m_VoxelPSO.SetRasterizerState(VoxelizationRasterizer);
+        m_VoxelPSO.SetBlendState(VoxelizationBlendDisable);
+        m_VoxelPSO.SetDepthStencilState(DepthStateDisabled);
+        m_VoxelPSO.SetInputLayout(0, nullptr);
+        m_VoxelPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
+        m_VoxelPSO.SetRenderTargetFormats(1, &ColorFormat, DepthFormat);
+        m_VoxelPSO.SetVertexShader(g_pVCTVoxelizationVS, sizeof(g_pVCTVoxelizationVS));
+        m_VoxelPSO.SetPixelShader(g_pVCTVoxelizationPS, sizeof(g_pVCTVoxelizationPS));
+
+
 
     }
 
@@ -70,7 +171,7 @@ namespace VCT
 
     }
 
-    void VCT::Render(ComputeContext& Context, bool bUsePreComputedLuma)
+    void VCT::Render(ComputeContext& Context)
     {
 
     }

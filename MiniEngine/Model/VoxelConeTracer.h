@@ -15,14 +15,14 @@ namespace VCT
 	extern BoolVar Enable;
 	extern BoolVar DebugDraw;
 
-	extern NumVar VoxelSize;
-
+	extern NumVar VoxelSize; // = 20 / 128
+	extern NumVar VoxelRes; // 128
 
 	void Initialize(void);
 	void Shutdown(void);
-	void Render(ComputeContext& Context, bool bUsePreComputedLuma);
+	void Render(ComputeContext& Context);
 
-	void Voxelize(CommandContext& context, const Math::Vector3& worldMin, float voxelSize);
+	void Voxelize(CommandContext& context);
 	void LightInjection(CommandContext& context);
 	void GenerateMipmaps(CommandContext& context);
 

@@ -1,12 +1,26 @@
 #define _RootSig \
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
-    "CBV(b0), " \
-	"CBV(b1)"
+    "CBV(b0, visibility = SHADER_VISIBILITY_VERTEX), " \
+    "CBV(b0, visibility = SHADER_VISIBILITY_PIXEL), " \
+    "DescriptorTable(SRV(t0, numDescriptors = 10), visibility = SHADER_VISIBILITY_PIXEL)," \
+    "DescriptorTable(Sampler(s0, numDescriptors = 10), visibility = SHADER_VISIBILITY_PIXEL)," \
+    "DescriptorTable(SRV(t10, numDescriptors = 10), visibility = SHADER_VISIBILITY_PIXEL)," \
+    "CBV(b1), " \
+    "DescriptorTable(UAV(u0, numDescriptors = 10), visibility = SHADER_VISIBILITY_PIXEL), " \
+    "SRV(t20, visibility = SHADER_VISIBILITY_VERTEX), " \
+    "StaticSampler(s10, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)," \
+    "StaticSampler(s11, visibility = SHADER_VISIBILITY_PIXEL," \
+        "addressU = TEXTURE_ADDRESS_CLAMP," \
+        "addressV = TEXTURE_ADDRESS_CLAMP," \
+        "addressW = TEXTURE_ADDRESS_CLAMP," \
+        "comparisonFunc = COMPARISON_GREATER_EQUAL," \
+        "filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
+    "StaticSampler(s12, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)"
 
 cbuffer MeshConstants : register(b0)
 {
-    float4x4 WorldMatrix; // Object to world
-    float3x3 WorldIT; // Object normal to world normal
+    float4x4 ModelToWorldMatrix; // Object to world
+    float4x4 WorldToModelMatrix; // World to Object
 };
 
 cbuffer GlobalConstants : register(b1)
@@ -16,24 +30,30 @@ cbuffer GlobalConstants : register(b1)
 
 struct VSInput
 {
-    float3 pos : POSITION;
+    float3 position : POSITION;
     float3 normal : NORMAL;
-    float2 uv0 : TEXCOORD0;
 };
 
 struct VSOutput
 {
-    float4 pos : SV_POSITION;
-    float3 worldPos : WORLD_POS;
-	float2 uv : TEXCOORD0;
+    float3 worldPositionGeom : WORLDPOS;
+    float3 normalGeom : WORLDNORM;
+    float4 position : SV_POSITION;
 };
 
 [RootSignature(_RootSig)]
 VSOutput main(VSInput input)
 {
     VSOutput output;
-    output.pos = mul(ViewProjMatrix, float4(input.pos, 1.0f));
-    output.worldPos = input.pos;
-    output.uv = input.uv0;
+    
+    // Transform position to world space
+    output.worldPositionGeom = mul(ModelToWorldMatrix, float4(input.position, 1.0)).xyz;
+    
+    // Transform normal to world space using normal matrix (transpose of inverse model matrix)
+    output.normalGeom = normalize(mul((float3x3) transpose(WorldToModelMatrix), input.normal));
+    
+    // Transform to clip space
+    output.position = mul(ViewProjMatrix, float4(output.worldPositionGeom, 1.0));
+    
     return output;
 }

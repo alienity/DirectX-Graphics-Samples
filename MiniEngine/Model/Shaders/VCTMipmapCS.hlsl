@@ -1,28 +1,40 @@
-// MipmapCS.hlsl
-#include "VCTVoxelCommon.hlsli"
+#define _RootSig \
+    "RootFlags(0), " \
+    "CBV(b0), " \
+    "DescriptorTable(SRV(t0, numDescriptors = 10))," \
+    "DescriptorTable(UAV(u0, numDescriptors = 10))," \
+    "StaticSampler(s10, maxAnisotropy = 8)," \
+    "StaticSampler(s11," \
+        "addressU = TEXTURE_ADDRESS_CLAMP," \
+        "addressV = TEXTURE_ADDRESS_CLAMP," \
+        "addressW = TEXTURE_ADDRESS_CLAMP," \
+        "comparisonFunc = COMPARISON_GREATER_EQUAL," \
+        "filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
+    "StaticSampler(s12, maxAnisotropy = 8)"
 
-// u0: src level (read)
-// u1: dst level (write)
-RWTexture3D<float4> g_SrcVolume : register(u0);
-RWTexture3D<float4> g_DstVolume : register(u1);
-
-// 根着色器常量传入当前 mip level（实际未用，dispatch size 已隐含）
-cbuffer MipCB : register(b0)
+cbuffer MipConstants : register(b0)
 {
-    uint g_SrcLevel;
+    uint srcLevel;
 }
 
-[numthreads(4, 4, 4)]
+Texture3D<float4> srcVolume : register(t0);
+RWTexture3D<float4> dstVolume : register(u0);
+
+[RootSignature(_RootSig)]
+[numthreads(8, 8, 8)]
 void main(uint3 groupId : SV_GroupID, uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    // 对 2x2x2 邻域采样平均（box filter）
     float4 sum = 0;
     for (int z = 0; z < 2; ++z)
+    {
         for (int y = 0; y < 2; ++y)
+        {
             for (int x = 0; x < 2; ++x)
             {
                 uint3 srcIdx = dispatchThreadId * 2 + uint3(x, y, z);
-                sum += g_SrcVolume[srcIdx];
+                sum += srcVolume[srcIdx];
             }
-    g_DstVolume[dispatchThreadId] = sum / 8.0f;
+        }
+    }
+    dstVolume[dispatchThreadId] = sum / 8.0f;
 }

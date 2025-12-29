@@ -1,11 +1,6 @@
 #include "Common.hlsli"
 #include "Lighting.hlsli"
 
-#define _RootSig \
-    "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
-    "CBV(b0), " \
-	"CBV(b1)"
-
 Texture3D<float4> voxelAlbedoVol : register(t0);
 Texture3D<float4> voxelNormalVol : register(t1);
 
@@ -13,7 +8,7 @@ Texture2D<float> texShadow : register(t13);
 
 RWTexture3D<float4> voxelRadianceVol : register(u0);
 
-cbuffer VolumeConstants : register(b0)
+cbuffer VolumeConstants : register(b1)
 {
     float4x4 worldToProjection;
     float4x4 worldToShadow;
@@ -63,8 +58,25 @@ float3 DecodeNormal(float3 n)
     return n * 2.0f - 1.0f; // [0,1] to [-1,1]
 }
 
+#define _RootSig \
+    "RootFlags(0), " \
+    "CBV(b0), " \
+    "DescriptorTable(SRV(t0, numDescriptors = 10))," \
+    "DescriptorTable(Sampler(s0, numDescriptors = 10))," \
+    "DescriptorTable(SRV(t10, numDescriptors = 10))," \
+    "CBV(b1), " \
+    "DescriptorTable(UAV(u0, numDescriptors = 10))," \
+    "StaticSampler(s10, maxAnisotropy = 8)," \
+    "StaticSampler(s11," \
+        "addressU = TEXTURE_ADDRESS_CLAMP," \
+        "addressV = TEXTURE_ADDRESS_CLAMP," \
+        "addressW = TEXTURE_ADDRESS_CLAMP," \
+        "comparisonFunc = COMPARISON_GREATER_EQUAL," \
+        "filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
+    "StaticSampler(s12, maxAnisotropy = 8)"
+
 [RootSignature(_RootSig)]
-[numthreads(4, 4, 4)]
+[numthreads(8, 8, 8)]
 void main(uint3 groupId : SV_GroupID, uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     if (any(dispatchThreadId >= voxelRes))
@@ -90,79 +102,47 @@ void main(uint3 groupId : SV_GroupID, uint3 dispatchThreadId : SV_DispatchThread
         colorSum += ApplyAmbientLight(diffuseAlbedo, 1, AmbientColor);
     }
 
-    float3 specularAlbedo = float3(0, 0, 0);
-    float specularMask = 0;
-    float3 tmpViewDir = normalize(viewDir);
-    colorSum += ApplyDirectionalLight(diffuseAlbedo, specularAlbedo, specularMask, 0, normal, tmpViewDir, SunDirection, SunColor, shadowCoord, texShadow);
-
-    ShadeLights(colorSum, pixelPos,
-		diffuseAlbedo,
-		specularAlbedo,
-		specularMask,
-		gloss,
-		normal,
-		viewDir,
-		vsOutput.worldPos
-		);
-
-
-
-
-
-
-
-
-
-
-
-
-
-    float3 totalLight = 0;
-    
-    totalLight += AmbientColor * albedo;
-    
-    float3 dirLightContribution = CalculateDirectionalLightContribution(worldPos, normal, albedo, SunDirection, SunColor);
-    totalLight += dirLightContribution;
-    
-    // 计算点光源贡献
-    uint numPointLights = min(FirstLightIndex.x, 128u); // 使用light manager中的第一个锥形光索引作为点光源数量的上限
-    for (uint i = 0; i < numPointLights; ++i)
+    for (uint lightIndex = 0; lightIndex < MAX_LIGHTS; lightIndex += 1)
     {
-        // 跳过锥形光和带阴影的锥形光
-        if (i >= FirstLightIndex.x) break; // 第一个锥形光索引
-        if (lightBuffer[i].type != 0) continue; // 只处理点光源 (type 0)
+        LightData lightData = lightBuffer[lightIndex];
+        float3 lightWorldPos = lightData.pos;
+        float lightCullRadius = sqrt(lightData.radiusSq);
+
+		/*
+        bool overlapping = true;
+        for (int p = 0; p < 6; p++)
+        {
+            float d = dot(lightWorldPos, frustumPlanes[p].xyz) + frustumPlanes[p].w;
+            if (d < -lightCullRadius)
+            {
+                overlapping = false;
+            }
+        }
         
-        LightData pointLight = lightBuffer[i];
-        float3 pointLightContribution = CalculatePointLightContribution(worldPos, normal, albedo, pointLight);
-        totalLight += pointLightContribution;
-    }
-    
-    // 计算锥形光贡献
-    uint numConeLights = min(FirstLightIndex.y, 128u); // 使用light manager中的第一个带阴影锥形光索引作为锥形光数量的上限
-    for (uint i = FirstLightIndex.x; i < numConeLights; ++i)
-    {
-        if (i >= FirstLightIndex.y) break; // 第一个带阴影锥形光索引
-        if (lightBuffer[i].type != 1) continue; // 只处理锥形光 (type 1)
+        if (!overlapping)
+            continue;
+		*/
         
-        LightData coneLight = lightBuffer[i];
-        float3 coneLightContribution = CalculatePointLightContribution(worldPos, normal, albedo, coneLight);
-        totalLight += coneLightContribution;
-    }
-    
-    // 计算带阴影的锥形光贡献
-    for (uint i = FirstLightIndex.y; i < 128u; ++i)
-    {
-        if (lightBuffer[i].type != 2) continue; // 只处理带阴影锥形光 (type 2)
+        float3 specularAlbedo = 0;
+        float specularMask = 0;
+		float gloss = 0;
         
-        LightData shadowedConeLight = lightBuffer[i];
-        float3 shadowedConeLightContribution = CalculatePointLightContribution(worldPos, normal, albedo, shadowedConeLight);
-        totalLight += shadowedConeLightContribution;
+        switch (lightData.type)
+        {
+            case 0: // sphere
+                colorSum += ApplyPointLight(POINT_LIGHT_ARGS);
+                break;
+
+            case 1: // cone
+                colorSum += ApplyConeLight(CONE_LIGHT_ARGS);
+                break;
+
+            case 2: // cone w/ shadow map
+                colorSum += ApplyConeShadowedLight(SHADOWED_LIGHT_ARGS);
+                break;
+        }
     }
+
+    voxelRadianceVol[dispatchThreadId] = float4(colorSum.rgb, 0);
     
-    // 确保光照值在合理范围内
-    totalLight = max(totalLight, 0.0f);
-    
-    float3 radiance = totalLight;
-    
-    voxelRadianceVol[dispatchThreadId] = float4(radiance, 1.0f);
 }

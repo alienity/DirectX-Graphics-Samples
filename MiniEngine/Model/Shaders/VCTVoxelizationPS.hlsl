@@ -1,30 +1,51 @@
 #define _RootSig \
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
-    "CBV(b0), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 2))," \
-    "DescriptorTable(Sampler(s0, numDescriptors = 2))," \
-	"CBV(b1), " \
-    "DescriptorTable(UAV(u0, numDescriptors = 2))"
+    "CBV(b0, visibility = SHADER_VISIBILITY_VERTEX), " \
+    "CBV(b0, visibility = SHADER_VISIBILITY_PIXEL), " \
+    "DescriptorTable(SRV(t0, numDescriptors = 10), visibility = SHADER_VISIBILITY_PIXEL)," \
+    "DescriptorTable(Sampler(s0, numDescriptors = 10), visibility = SHADER_VISIBILITY_PIXEL)," \
+    "DescriptorTable(SRV(t10, numDescriptors = 10), visibility = SHADER_VISIBILITY_PIXEL)," \
+    "CBV(b1), " \
+    "DescriptorTable(UAV(u0, numDescriptors = 10), visibility = SHADER_VISIBILITY_PIXEL), " \
+    "SRV(t20, visibility = SHADER_VISIBILITY_VERTEX), " \
+    "StaticSampler(s10, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)," \
+    "StaticSampler(s11, visibility = SHADER_VISIBILITY_PIXEL," \
+        "addressU = TEXTURE_ADDRESS_CLAMP," \
+        "addressV = TEXTURE_ADDRESS_CLAMP," \
+        "addressW = TEXTURE_ADDRESS_CLAMP," \
+        "comparisonFunc = COMPARISON_GREATER_EQUAL," \
+        "filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
+    "StaticSampler(s12, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)"
+
+#include "Common.hlsli"
+
+Texture2D<float4> baseColorTexture : register(t0);
+Texture2D<float3> emissiveTexture : register(t3);
+Texture2D<float3> normalTexture : register(t4);
+
+SamplerState baseColorSampler : register(s0);
+SamplerState emissiveSampler : register(s3);
+SamplerState normalSampler : register(s4);
+
+Texture2D<float> texSunShadow : register(t13);
 
 cbuffer MaterialConstants : register(b0)
 {
     float4 baseColorFactor;
+    float3 emissiveFactor;
     float normalTextureScale;
-    float3 _pad0;
+    uint flags;
+    float3 _Padding;
 }
-
-Texture2D<float4> baseColorTexture : register(t0);
-Texture2D<float3> normalTexture : register(t1);
-
-SamplerState baseColorSampler : register(s0);
-SamplerState normalSampler : register(s1);
 
 cbuffer GlobalConstants : register(b1)
 {
+    float4x4 ViewProj;
+    float4x4 SunShadowMatrix;
     float3 ViewerPos;
-    float VoxelSize; // = 20 / 128
-    float3 VoxelWorldMin; // [-10, -10, -10]
-    uint VoxelRes; // = 128
+    float3 SunDirection;
+    float3 SunIntensity;
+    float _pad;
 }
 
 RWTexture3D<float4> voxelColorVolume : register(u0);
@@ -32,20 +53,10 @@ RWTexture3D<float4> voxelNormalVolume : register(u1);
 
 struct PSInput
 {
-    float4 pos : SV_POSITION;
-    float3 worldPos : WORLD_POS;
-    float2 uv : TEXCOORD0;
+    float4 position : SV_POSITION;
+    float3 worldPositionFrag : WORLDPOS;
+    float3 normalFrag : WORLDNORM;
 };
-
-int3 WorldToVoxelIndex(float3 w)
-{
-    return int3((w - VoxelWorldMin) / VoxelSize);
-}
-
-bool IsValid(int3 idx)
-{
-    return all(idx >= 0) && all(idx < int(VoxelRes));
-}
 
 [RootSignature(_RootSig)]
 void main(PSInput input)
