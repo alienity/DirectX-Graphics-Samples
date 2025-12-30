@@ -95,7 +95,6 @@
   <ItemGroup>
     <None Include="packages.config" />
     <None Include="Shaders\Common.hlsli" />
-    <None Include="Shaders\VCTVoxelCommon.hlsli" />
     <None Include="Shaders\FillLightGridCS.hlsli" />
     <None Include="Shaders\LightGrid.hlsli" />
     <None Include="Shaders\Lighting.hlsli" />
@@ -177,13 +176,14 @@
     <FxCompile Include="Shaders\VCTLightingPS.hlsl" />
     <FxCompile Include="Shaders\VCTLightInjectionCS.hlsl" />
     <FxCompile Include="Shaders\VCTMipmapCS.hlsl" />
-    <FxCompile Include="Shaders\VCTVoxelizationCS.hlsl" />
-    <FxCompile Include="Shaders\VCTVoxelizationGS.hlsl" />
-    <FxCompile Include="Shaders\VCTVoxelizationVS.hlsl">
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+    <FxCompile Include="Shaders\VCTVoxelizationGS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Geometry</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\VCTVoxelizationPS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\VCTVoxelizationVS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
     </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
