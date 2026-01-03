@@ -41,24 +41,15 @@ using int4 = XMINT4;
 
 namespace VCT
 {
-    class VolumeTexture : public GpuResource
+    class VolumeBuffer : public ColorBuffer
     {
     public:
-        void Create(int width = 128, int height = 128, int depth = 128,
-                    DXGI_FORMAT internalFormat = DXGI_FORMAT_R16G16B16A16_FLOAT, uint32_t mipLevels = 1,
-                    std::string name = "VoxelTexture");
-        D3D12_CPU_DESCRIPTOR_HANDLE GetUAV(uint32_t mipLevel = 0) const;
-        D3D12_CPU_DESCRIPTOR_HANDLE GetSRV() const;
-
-        int GetWidth() const;
-        int GetHeight() const;
-        int GetDepth() const;
-
+        void Create(const std::wstring& Name, uint32_t Width, uint32_t Height, uint32_t Depth, uint32_t NumMips,
+            DXGI_FORMAT Format, D3D12_GPU_VIRTUAL_ADDRESS VidMemPtr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN);
+    protected:
+        void CreateDerived3DViews(ID3D12Device* Device, DXGI_FORMAT Format, uint32_t DpethOrArraySize, uint32_t NumMips = 1);
     private:
-        Math::Vector3 m_Size;
-        uint32_t m_MipLevels;
-        std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> m_UAVs;
-        D3D12_CPU_DESCRIPTOR_HANDLE m_SRV;
+        D3D12_RESOURCE_DESC DescribeTex3D(uint32_t Width, uint32_t Height, uint32_t DpethOrArraySize, uint32_t NumMips, DXGI_FORMAT Format, UINT Flags);
     };
 
     class OrthoVoxelCamera : public Math::BaseCamera
@@ -540,11 +531,11 @@ namespace VCT
 
             uint32_t clipmap_to_update = 0;
 
-            VolumeTexture radiance;
-            VolumeTexture prev_radiance;
-            VolumeTexture render_atomic;
-            VolumeTexture sdf;
-            VolumeTexture sdf_temp;
+            VolumeBuffer radiance;
+            VolumeBuffer prev_radiance;
+            VolumeBuffer render_atomic;
+            VolumeBuffer sdf;
+            VolumeBuffer sdf_temp;
             mutable bool pre_clear = true;
         } vxgi;
 

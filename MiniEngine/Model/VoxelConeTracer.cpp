@@ -39,80 +39,95 @@ namespace VCT
         return wstr;
     }
 
-    void VolumeTexture::Create(int width, int height, int depth, DXGI_FORMAT internalFormat, uint32_t mipLevels,
-                               std::string name)
+    void VolumeBuffer::Create(const std::wstring& Name, uint32_t Width, uint32_t Height, uint32_t Depth, uint32_t NumMips, DXGI_FORMAT Format, D3D12_GPU_VIRTUAL_ADDRESS VidMem)
     {
-        m_Size = Math::Vector3(width, height, depth);
-        m_MipLevels = mipLevels;
+        NumMips = (NumMips == 0 ? ComputeNumMips(Width, Height) : NumMips);
+        D3D12_RESOURCE_FLAGS Flags = CombineResourceFlags();
+        D3D12_RESOURCE_DESC ResourceDesc = DescribeTex3D(Width, Height, Depth, NumMips, Format, Flags);
 
-        D3D12_RESOURCE_DESC texDesc = {};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
-        texDesc.Width = width;
-        texDesc.Height = height;
-        texDesc.DepthOrArraySize = depth;
-        texDesc.MipLevels = mipLevels;
-        texDesc.Format = internalFormat;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-        texDesc.SampleDesc.Count = 1;
+        ResourceDesc.SampleDesc.Count = m_FragmentCount;
+        ResourceDesc.SampleDesc.Quality = 0;
 
-        D3D12_HEAP_PROPERTIES HeapProps;
-        HeapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
-        HeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        HeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-        HeapProps.CreationNodeMask = 1;
-        HeapProps.VisibleNodeMask = 1;
+        D3D12_CLEAR_VALUE ClearValue = {};
+        ClearValue.Format = Format;
+        ClearValue.Color[0] = m_ClearColor.R();
+        ClearValue.Color[1] = m_ClearColor.G();
+        ClearValue.Color[2] = m_ClearColor.B();
+        ClearValue.Color[3] = m_ClearColor.A();
 
-        ASSERT_SUCCEEDED(
-            Graphics::g_Device->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE, &texDesc,
-                D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, MY_IID_PPV_ARGS(&m_pResource)));
+        CreateTextureResource(Graphics::g_Device, Name, ResourceDesc, ClearValue, VidMem);
+        CreateDerived3DViews(Graphics::g_Device, Format, Depth, NumMips);
+    }
 
-        m_pResource->SetName(StringToLPCWSTR(name));
+    void VolumeBuffer::CreateDerived3DViews(ID3D12Device* Device, DXGI_FORMAT Format, uint32_t DpethOrArraySize, uint32_t NumMips = 1)
+    {
+        ASSERT(DpethOrArraySize == 1 || NumMips == 1, "We don't support auto-mips on texture arrays");
 
-        m_UsageState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        m_NumMipMaps = NumMips - 1;
 
-        m_UAVs.resize(mipLevels);
-        for (uint32_t i = 0; i < mipLevels; ++i)
+        D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
+        D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
+
+        UAVDesc.Format = GetUAVFormat(Format);
+        SRVDesc.Format = Format;
+        SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+        UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+        UAVDesc.Texture3D.MipSlice = 0;
+        UAVDesc.Texture3D.FirstWSlice = 0;
+        UAVDesc.Texture3D.WSize = UINT_MAX;
+
+        SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        SRVDesc.Texture3D.MipLevels = NumMips;
+        SRVDesc.Texture3D.MostDetailedMip = 0;
+        SRVDesc.Texture3D.ResourceMinLODClamp = 0;
+
+        if (m_SRVHandle.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
         {
-            D3D12_CPU_DESCRIPTOR_HANDLE uavHandle = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-            uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-            uavDesc.Texture3D.MipSlice = i;
-            uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-            Graphics::g_Device->CreateUnorderedAccessView(m_pResource.Get(), nullptr, &uavDesc, uavHandle);
-            m_UAVs[i] = uavHandle;
+            m_RTVHandle = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+            m_SRVHandle = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         }
 
-        m_SRV = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
-        srvDesc.Texture3D.MipLevels = mipLevels;
-        srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        Graphics::g_Device->CreateShaderResourceView(m_pResource.Get(), &srvDesc, m_SRV);
+        ID3D12Resource* Resource = m_pResource.Get();
+
+        // Create the shader resource view
+        Device->CreateShaderResourceView(Resource, &SRVDesc, m_SRVHandle);
+
+        if (m_FragmentCount > 1)
+            return;
+
+        // Create the UAVs for each mip level (RWTexture2D)
+        for (uint32_t i = 0; i < NumMips; ++i)
+        {
+            if (m_UAVHandle[i].ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
+                m_UAVHandle[i] = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+            Device->CreateUnorderedAccessView(Resource, nullptr, &UAVDesc, m_UAVHandle[i]);
+
+            UAVDesc.Texture2D.MipSlice++;
+        }
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE VolumeTexture::GetUAV(uint32_t mipLevel) const
+    D3D12_RESOURCE_DESC VolumeBuffer::DescribeTex3D(uint32_t Width, uint32_t Height, uint32_t DepthOrArraySize, uint32_t NumMips, DXGI_FORMAT Format, UINT Flags)
     {
-        return m_UAVs[mipLevel];
-    }
+        m_Width = Width;
+        m_Height = Height;
+        m_ArraySize = DepthOrArraySize;
+        m_Format = Format;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE VolumeTexture::GetSRV() const
-    {
-        return m_SRV;
-    }
-
-    int VolumeTexture::GetWidth() const
-    {
-        return m_Size.GetX();
-    }
-
-    int VolumeTexture::GetHeight() const
-    {
-        return m_Size.GetY();
-    }
-
-    int VolumeTexture::GetDepth() const
-    {
-        return m_Size.GetZ();
+        D3D12_RESOURCE_DESC Desc = {};
+        Desc.Alignment = 0;
+        Desc.DepthOrArraySize = (UINT16)DepthOrArraySize;
+        Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+        Desc.Flags = (D3D12_RESOURCE_FLAGS)Flags;
+        Desc.Format = GetBaseFormat(Format);
+        Desc.Height = (UINT)Height;
+        Desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        Desc.MipLevels = (UINT16)NumMips;
+        Desc.SampleDesc.Count = 1;
+        Desc.SampleDesc.Quality = 0;
+        Desc.Width = (UINT64)Width;
+        return Desc;
     }
 
     void OrthoVoxelCamera::UpdateMatrix(Vector3 ForwardDirection, Vector3 CameraCenter, Vector3 VoxelBounds,
@@ -162,22 +177,18 @@ namespace VCT
     {
         if (vxgi.radiance.GetResource() != nullptr)
         {
-            vxgi.radiance.Create(vxgi.res * (6 + DIFFUSE_CONE_COUNT), vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res,
-                                 DXGI_FORMAT_R16G16B16A16_FLOAT, 1, "vxgi.radiance");
-            vxgi.prev_radiance.Create(vxgi.res * (6 + DIFFUSE_CONE_COUNT), vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res,
-                                      DXGI_FORMAT_R16G16B16A16_FLOAT, 1, "vxgi.prev_radiance");
+            vxgi.radiance.Create(L"vxgi.radiance", vxgi.res * (6 + DIFFUSE_CONE_COUNT), vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+            vxgi.prev_radiance.Create(L"vxgi.prev_radiance", vxgi.res * (6 + DIFFUSE_CONE_COUNT), vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
             vxgi.pre_clear = true;
         }
         if (vxgi.render_atomic.GetResource() != nullptr)
         {
-            vxgi.render_atomic.Create(vxgi.res * 6, vxgi.res, vxgi.res * VOXELIZATION_CHANNEL_COUNT,
-                                      DXGI_FORMAT_R32_UINT, 1, "vxgi.render_atomic");
+            vxgi.render_atomic.Create(L"vxgi.render_atomic", vxgi.res * 6, vxgi.res, vxgi.res * VOXELIZATION_CHANNEL_COUNT, 1, DXGI_FORMAT_R32_UINT);
         }
         if (vxgi.sdf.GetResource() != nullptr)
         {
-            vxgi.sdf.Create(vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, DXGI_FORMAT_R16_FLOAT, 1, "vxgi.sdf");
-            vxgi.sdf_temp.Create(vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, DXGI_FORMAT_R16_FLOAT, 1,
-                                 "vxgi.sdf_temp");
+            vxgi.sdf.Create(L"vxgi.sdf", vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16_FLOAT);
+            vxgi.sdf_temp.Create(L"vxgi.sdf_temp", vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16_FLOAT);
         }
         vxgi.clipmap_to_update = (vxgi.clipmap_to_update + 1) % VXGI_CLIPMAP_COUNT;
 
@@ -258,11 +269,11 @@ namespace VCT
                 gfxContext.TransitionResource(scene_gi.vxgi.sdf_temp, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                 gfxContext.FlushResourceBarriers();
             }
-            gfxContext.ClearUAV(&scene_gi.vxgi.prev_radiance);
-            gfxContext.ClearUAV(&scene_gi.vxgi.radiance);
-            gfxContext.ClearUAV(&scene_gi.vxgi.sdf);
-            gfxContext.ClearUAV(&scene_gi.vxgi.sdf_temp);
-            gfxContext.ClearUAV(&scene_gi.vxgi.render_atomic);
+            gfxContext.ClearUAV(scene_gi.vxgi.prev_radiance);
+            gfxContext.ClearUAV(scene_gi.vxgi.radiance);
+            gfxContext.ClearUAV(scene_gi.vxgi.sdf);
+            gfxContext.ClearUAV(scene_gi.vxgi.sdf_temp);
+            gfxContext.ClearUAV(scene_gi.vxgi.render_atomic);
             scene_gi.vxgi.pre_clear = false;;
         }
         else
