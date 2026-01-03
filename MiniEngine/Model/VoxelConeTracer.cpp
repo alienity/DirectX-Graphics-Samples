@@ -1,68 +1,72 @@
-#include "pch.h"
+#include "GraphicsCore.h"
+#include "BufferManager.h"
+#include "Camera.h"
+#include "ShadowCamera.h"
+#include "CommandContext.h"
+#include "TemporalEffects.h"
 #include "VoxelConeTracer.h"
-#include "../Core/GraphicsCore.h"
-#include "../Core/BufferManager.h"
-#include "../Core/CommandContext.h"
+#include "Renderer.h"
 
-#include "CompiledShaders/VCTVoxelizationVS.h"
-#include "CompiledShaders/VCTVoxelizationPS.h"
-#include "CompiledShaders/VCTLightInjectionCS.h"
+// From Model
+#include <cmath>
+
+#include "ModelH3D.h"
+
+#include "CompiledShaders/VXGIVoxelizationVS.h"
+#include "CompiledShaders/VXGIVoxelizationGS.h"
+#include "CompiledShaders/VXGIVoxelizationPS.h"
 
 
 using namespace Graphics;
+using namespace Math;
 
 namespace VCT
 {
-    BoolVar Enable("Graphics/VCT/Enable", true);
-    BoolVar DebugDraw("Graphics/VCT/DebugDraw", false);
-    NumVar VoxelSize("Graphics/VCT/Voxel Size", 20 / 128);
-	NumVar VoxelCount("Graphics/VCT/Voxel Resolution", 128);
-
-    RootSignature m_RootSig;
-    GraphicsPSO m_VoxelPSO(L"Renderer: Voxelization PSO"); // Not finalized.  Used as a template.
-
-    GraphicsPSO s_VCTVoxelizationVS(L"VCT: Voxelize VS");
-    GraphicsPSO s_VCTVoxelizationPS(L"VCT: Voxelize PS");
-
-	ComputePSO  s_VCTLightInjectionCS(L"DOF: Pass 1 CS");
-    ComputePSO  s_VCTGenMipmapCS(L"DOF: Pass 1 CS");
-
-    D3D12_RASTERIZER_DESC VoxelizationRasterizer;
-
-    D3D12_BLEND_DESC VoxelizationBlendDesc;
-
-    enum RootBindings
+    LPCWSTR StringToLPCWSTR(const std::string& str)
     {
-        kMeshConstants,
-        kMaterialConstants,
-        kMaterialSRVs,
-        kMaterialSamplers,
-        kCommonSRVs,
-        kCommonCBV,
-        kCommoUAV,
-        kSkinMatrices,
+        int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), NULL, 0);
+        static std::vector<wchar_t> buffer(size_needed + 1);
+        MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), buffer.data(), size_needed);
+        buffer[size_needed] = 0;
+        return buffer.data();
+    }
 
-        kNumRootBindings
-    };
-
-    void VoxelVolume::Create(uint32_t size, uint32_t mipLevels)
+    std::wstring ConvertToWString(const std::string& str)
     {
-        m_Size = size;
+        int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), NULL, 0);
+        std::wstring wstr(size_needed, 0);
+        MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), &wstr[0], size_needed);
+        return wstr;
+    }
+
+    void VolumeTexture::Create(int width, int height, int depth, DXGI_FORMAT internalFormat, uint32_t mipLevels,
+                               std::string name)
+    {
+        m_Size = Math::Vector3(width, height, depth);
         m_MipLevels = mipLevels;
 
         D3D12_RESOURCE_DESC texDesc = {};
         texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
-        texDesc.Width = size;
-        texDesc.Height = size;
-        texDesc.DepthOrArraySize = size;
+        texDesc.Width = width;
+        texDesc.Height = height;
+        texDesc.DepthOrArraySize = depth;
         texDesc.MipLevels = mipLevels;
-        texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        texDesc.Format = internalFormat;
         texDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         texDesc.SampleDesc.Count = 1;
 
-        CD3DX12_HEAP_PROPERTIES HeapProps(D3D12_HEAP_TYPE_DEFAULT);
-        ASSERT_SUCCEEDED(Graphics::g_Device->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE,
-            &texDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, MY_IID_PPV_ARGS(&m_pResource)));
+        D3D12_HEAP_PROPERTIES HeapProps;
+        HeapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+        HeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+        HeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+        HeapProps.CreationNodeMask = 1;
+        HeapProps.VisibleNodeMask = 1;
+
+        ASSERT_SUCCEEDED(
+            Graphics::g_Device->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE, &texDesc,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, MY_IID_PPV_ARGS(&m_pResource)));
+
+        m_pResource->SetName(StringToLPCWSTR(name));
 
         m_UsageState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
@@ -86,19 +90,466 @@ namespace VCT
         Graphics::g_Device->CreateShaderResourceView(m_pResource.Get(), &srvDesc, m_SRV);
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE VoxelVolume::GetUAV(uint32_t mipLevel) const
+    D3D12_CPU_DESCRIPTOR_HANDLE VolumeTexture::GetUAV(uint32_t mipLevel) const
     {
         return m_UAVs[mipLevel];
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE VoxelVolume::GetSRV() const
+    D3D12_CPU_DESCRIPTOR_HANDLE VolumeTexture::GetSRV() const
     {
         return m_SRV;
     }
 
-
-    void VCT::Initialize(void)
+    int VolumeTexture::GetWidth() const
     {
+        return m_Size.GetX();
+    }
+
+    int VolumeTexture::GetHeight() const
+    {
+        return m_Size.GetY();
+    }
+
+    int VolumeTexture::GetDepth() const
+    {
+        return m_Size.GetZ();
+    }
+
+    void OrthoVoxelCamera::UpdateMatrix(Vector3 ForwardDirection, Vector3 CameraCenter, Vector3 VoxelBounds,
+                                        float VoxelSize)
+    {
+        SetLookDirection(ForwardDirection, Vector3(kZUnitVector));
+
+        // Converts world units to texel units so we can quantize the camera position to whole texel units
+        Vector3 RcpDimensions = Recip(VoxelBounds);
+        Vector3 QuantizeScale = Vector3(VoxelSize, VoxelSize, VoxelSize);
+
+        //
+        // Recenter the camera at the quantized position
+        //
+
+        // Transform to view space
+        CameraCenter = ~GetRotation() * CameraCenter;
+        // Scale to texel units, truncate fractional part, and scale back to world units
+        CameraCenter = Floor(CameraCenter * QuantizeScale) / QuantizeScale;
+        // Transform back into world space
+        CameraCenter = GetRotation() * CameraCenter;
+
+        SetPosition(CameraCenter);
+
+        SetProjMatrix(Matrix4::MakeScale(Vector3(2.0f, 2.0f, 1.0f) * RcpDimensions));
+
+        Update();
+
+        // Transform from clip space to texture space
+        m_VoxelMatrix = Matrix4(AffineTransform(Matrix3::MakeScale(0.5f, -0.5f, 1.0f), Vector3(0.5f, 0.5f, 0.0f))) *
+            m_ViewProjMatrix;
+    }
+}
+
+namespace VCT
+{
+    void SceneGI::Destroy()
+    {
+        vxgi.radiance.Destroy();
+        vxgi.prev_radiance.Destroy();
+        vxgi.render_atomic.Destroy();
+        vxgi.sdf.Destroy();
+        vxgi.sdf_temp.Destroy();
+    }
+
+    void SceneGI::Update(const Camera& camera)
+    {
+        if (vxgi.radiance.GetResource() != nullptr)
+        {
+            vxgi.radiance.Create(vxgi.res * (6 + DIFFUSE_CONE_COUNT), vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res,
+                                 DXGI_FORMAT_R16G16B16A16_FLOAT, 1, "vxgi.radiance");
+            vxgi.prev_radiance.Create(vxgi.res * (6 + DIFFUSE_CONE_COUNT), vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res,
+                                      DXGI_FORMAT_R16G16B16A16_FLOAT, 1, "vxgi.prev_radiance");
+            vxgi.pre_clear = true;
+        }
+        if (vxgi.render_atomic.GetResource() != nullptr)
+        {
+            vxgi.render_atomic.Create(vxgi.res * 6, vxgi.res, vxgi.res * VOXELIZATION_CHANNEL_COUNT,
+                                      DXGI_FORMAT_R32_UINT, 1, "vxgi.render_atomic");
+        }
+        if (vxgi.sdf.GetResource() != nullptr)
+        {
+            vxgi.sdf.Create(vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, DXGI_FORMAT_R16_FLOAT, 1, "vxgi.sdf");
+            vxgi.sdf_temp.Create(vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, DXGI_FORMAT_R16_FLOAT, 1,
+                                 "vxgi.sdf_temp");
+        }
+        vxgi.clipmap_to_update = (vxgi.clipmap_to_update + 1) % VXGI_CLIPMAP_COUNT;
+
+        // VXGI volume update:
+        //	Note: this is using camera that the scene is associated with
+        {
+            Vector3 Eye = camera.GetPosition();
+
+            VXGI::ClipMap& clipmap = vxgi.clipmaps[vxgi.clipmap_to_update];
+            clipmap.voxelsize = vxgi.clipmaps[0].voxelsize * (1u << vxgi.clipmap_to_update);
+            const float texelSize = clipmap.voxelsize * 2;
+            XMFLOAT3 center = XMFLOAT3(std::floor(Eye.GetX() / texelSize) * texelSize,
+                                       std::floor(Eye.GetY() / texelSize) * texelSize,
+                                       std::floor(Eye.GetZ() / texelSize) * texelSize);
+            clipmap.offsetfromPrevFrame.x = int((clipmap.center.x - center.x) / texelSize);
+            clipmap.offsetfromPrevFrame.y = -int((clipmap.center.y - center.y) / texelSize);
+            clipmap.offsetfromPrevFrame.z = int((clipmap.center.z - center.z) / texelSize);
+            clipmap.center = center;
+            XMFLOAT3 extents = XMFLOAT3(vxgi.res * clipmap.voxelsize, vxgi.res * clipmap.voxelsize,
+                                        vxgi.res * clipmap.voxelsize);
+            if (extents.x != clipmap.extents.x || extents.y != clipmap.extents.y || extents.z != clipmap.extents.z)
+            {
+                vxgi.pre_clear = true;
+            }
+            clipmap.extents = extents;
+        }
+    }
+}
+
+namespace VCT
+{
+    enum eObjectFilter { kOpaque = 0x1, kCutout = 0x2, kTransparent = 0x4, kAll = 0xF, kNone = 0x0 };
+
+    ModelH3D m_Model;
+    std::vector<bool> m_pMaterialIsCutout;
+
+    OrthoVoxelCamera m_OrthoCamera;
+
+    BoolVar Enable("Graphics/VCT/Enable", true);
+    BoolVar DebugDraw("Graphics/VCT/DebugDraw", false);
+
+    SceneGI scene_gi;
+    VXGIResources vxgi_resources;
+
+    void CreateVXGIResources(VXGIResources& res, XMUINT2 resolution)
+    {
+        res.diffuse.Create(L"vxgi.diffuse", resolution.x, resolution.y, 1, DXGI_FORMAT_R11G11B10_FLOAT);
+        res.diffuse.Create(L"vxgi.specular", resolution.x, resolution.y, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        res.pre_clear = true;
+    }
+
+    void VXGI_Voxelize(CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
+                       ModelH3D& model, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
+    {
+        scene_gi.Update(camera);
+
+        const SceneGI::VXGI::ClipMap& clipmap = scene_gi.vxgi.clipmaps[scene_gi.vxgi.clipmap_to_update];
+
+        //Primitive::AABB bbox;
+        //bbox.createFromHalfWidth(clipmap.center, clipmap.extents);
+
+        VoxelizerCB cb;
+        cb.offsetfromPrevFrame = clipmap.offsetfromPrevFrame;
+        cb.clipmap_index = scene_gi.vxgi.clipmap_to_update;
+
+        GraphicsContext& gfxContext = BaseContext.GetGraphicsContext();
+        //Context.SetRootSignature();
+
+        gfxContext.SetDynamicConstantBufferView(CBSLOT_RENDERER_VOXELIZER, sizeof(VoxelizerCB), &cb);
+        if (scene_gi.vxgi.pre_clear)
+        {
+            EngineProfiling::BeginBlock(L"Pre Clear", &gfxContext);
+            {
+                gfxContext.TransitionResource(scene_gi.vxgi.render_atomic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(scene_gi.vxgi.prev_radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(scene_gi.vxgi.radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(scene_gi.vxgi.sdf, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(scene_gi.vxgi.sdf_temp, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.FlushResourceBarriers();
+            }
+            gfxContext.ClearUAV(&scene_gi.vxgi.prev_radiance);
+            gfxContext.ClearUAV(&scene_gi.vxgi.radiance);
+            gfxContext.ClearUAV(&scene_gi.vxgi.sdf);
+            gfxContext.ClearUAV(&scene_gi.vxgi.sdf_temp);
+            gfxContext.ClearUAV(&scene_gi.vxgi.render_atomic);
+            scene_gi.vxgi.pre_clear = false;;
+        }
+        else
+        {
+            {
+                GPUBarrier barriers[] = {
+                    GPUBarrier::Image(&scene.vxgi.render_atomic, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+                    GPUBarrier::Image(&scene.vxgi.prev_radiance, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+                    GPUBarrier::Image(&scene.vxgi.sdf, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+                    GPUBarrier::Image(&scene.vxgi.sdf_temp, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+                };
+                device->Barrier(barriers, arraysize(barriers), cmd);
+            }
+            device->EventBegin("Atomic Clear", cmd);
+            device->ClearUAV(&scene.vxgi.render_atomic, 0, cmd);
+            device->EventEnd(cmd);
+
+            device->EventBegin("Offset Previous Voxels", cmd);
+            device->BindComputeShader(&shaders[CSTYPE_VXGI_OFFSETPREV], cmd);
+            device->BindResource(&scene.vxgi.radiance, 0, cmd);
+            device->BindUAV(&scene.vxgi.prev_radiance, 0, cmd);
+
+            device->Dispatch(scene.vxgi.res / 8, scene.vxgi.res / 8, scene.vxgi.res / 8, cmd);
+
+            device->EventEnd(cmd);
+
+            {
+                GPUBarrier barriers[] = {
+                    GPUBarrier::Memory(&scene.vxgi.render_atomic),
+                    GPUBarrier::Image(&scene.vxgi.radiance, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+                };
+                device->Barrier(barriers, arraysize(barriers), cmd);
+            }
+        }
+
+        {
+            device->EventBegin("Voxelize", cmd);
+
+            Viewport vp;
+            vp.width = (float)scene.vxgi.res;
+            vp.height = (float)scene.vxgi.res;
+            device->BindViewports(1, &vp, cmd);
+
+            device->BindResource(&scene.vxgi.prev_radiance, 0, cmd);
+            device->BindUAV(&scene.vxgi.render_atomic, 0, cmd);
+
+            device->RenderPassBegin(nullptr, 0, cmd, RenderPassFlags::ALLOW_UAV_WRITES);
+#ifdef VOXELIZATION_GEOMETRY_SHADER_ENABLED
+            const uint32_t frustum_count = 1; // axis will be selected by geometry shader
+#else
+            const uint32_t frustum_count = 3; // just used to replicate 3 times for main axes, but not with real frustums
+#endif // VOXELIZATION_GEOMETRY_SHADER_ENABLED
+            RenderMeshes(vis, renderQueue, RENDERPASS_VOXELIZE, FILTER_OPAQUE, cmd, 0, frustum_count);
+            device->RenderPassEnd(cmd);
+
+            {
+                GPUBarrier barriers[] = {
+                    GPUBarrier::Image(&scene.vxgi.render_atomic, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+                    GPUBarrier::Image(&scene.vxgi.prev_radiance, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+                };
+                device->Barrier(barriers, arraysize(barriers), cmd);
+            }
+
+            device->EventEnd(cmd);
+        }
+
+        {
+            device->EventBegin("Temporal Blend Voxels", cmd);
+            device->BindComputeShader(&shaders[CSTYPE_VXGI_TEMPORAL], cmd);
+            device->BindResource(&scene.vxgi.prev_radiance, 0, cmd);
+            device->BindResource(&scene.vxgi.render_atomic, 1, cmd);
+            device->BindUAV(&scene.vxgi.radiance, 0, cmd);
+            device->BindUAV(&scene.vxgi.sdf, 1, cmd);
+
+            device->Dispatch(scene.vxgi.res / 8, scene.vxgi.res / 8, scene.vxgi.res / 8, cmd);
+
+            {
+                GPUBarrier barriers[] = {
+                    GPUBarrier::Image(&scene.vxgi.sdf, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+                    GPUBarrier::Image(&scene.vxgi.radiance, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+                };
+                device->Barrier(barriers, arraysize(barriers), cmd);
+            }
+            device->EventEnd(cmd);
+        }
+
+        {
+            device->EventBegin("SDF Jump Flood", cmd);
+            device->BindComputeShader(&shaders[CSTYPE_VXGI_SDF_JUMPFLOOD], cmd);
+
+            const Texture* _write = &scene.vxgi.sdf_temp;
+            const Texture* _read = &scene.vxgi.sdf;
+
+            int passcount = (int)std::ceil(std::log2((float)scene.vxgi.res));
+            for (int i = 0; i < passcount; ++i)
+            {
+                float jump_size = std::pow(2.0f, float(passcount - i - 1));
+                device->PushConstants(&jump_size, sizeof(jump_size), cmd);
+
+                device->BindUAV(_write, 0, cmd);
+                device->BindResource(_read, 0, cmd);
+
+                device->Dispatch(scene.vxgi.res / 8, scene.vxgi.res / 8, scene.vxgi.res / 8, cmd);
+
+                if (i < (passcount - 1))
+                {
+                    {
+                        GPUBarrier barriers[] = {
+                            GPUBarrier::Image(_write, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+                            GPUBarrier::Image(_read, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+                        };
+                        device->Barrier(barriers, arraysize(barriers), cmd);
+                    }
+                    std::swap(_read, _write);
+                }
+            }
+
+            {
+                GPUBarrier barriers[] = {
+                    GPUBarrier::Image(_write, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+                };
+                device->Barrier(barriers, arraysize(barriers), cmd);
+            }
+
+            device->EventEnd(cmd);
+        }
+    }
+
+    void VXGI_Resolve(
+        CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
+        const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
+    {
+        if (!GetVXGIEnabled() || !scene.vxgi.radiance.IsValid())
+        {
+            return;
+        }
+
+        device->EventBegin("VXGI - Resolve", cmd);
+        auto range = wi::profiler::BeginRangeGPU("VXGI - Resolve", cmd);
+
+        BindCommonResources(cmd);
+
+        if (res.pre_clear)
+        {
+            res.pre_clear = false;
+            {
+                GPUBarrier barriers[] = {
+                    GPUBarrier::Image(&res.diffuse, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+                    GPUBarrier::Image(&res.specular, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+                };
+                device->Barrier(barriers, arraysize(barriers), cmd);
+            }
+            device->ClearUAV(&res.diffuse, 0, cmd);
+            device->ClearUAV(&res.specular, 0, cmd);
+            {
+                GPUBarrier barriers[] = {
+                    GPUBarrier::Image(&res.diffuse, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+                    GPUBarrier::Image(&res.specular, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+                };
+                device->Barrier(barriers, arraysize(barriers), cmd);
+            }
+        }
+
+        {
+            GPUBarrier barriers[] = {
+                GPUBarrier::Image(&res.diffuse, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+                GPUBarrier::Image(&res.specular, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
+            };
+            device->Barrier(barriers, arraysize(barriers), cmd);
+        }
+
+        {
+            device->EventBegin("Diffuse", cmd);
+            device->BindComputeShader(&shaders[CSTYPE_VXGI_RESOLVE_DIFFUSE], cmd);
+
+            PostProcess postprocess;
+            device->BindUAV(&res.diffuse, 0, cmd);
+            postprocess.resolution.x = res.diffuse.desc.width;
+            postprocess.resolution.y = res.diffuse.desc.height;
+            postprocess.resolution_rcp.x = 1.0f / postprocess.resolution.x;
+            postprocess.resolution_rcp.y = 1.0f / postprocess.resolution.y;
+            device->PushConstants(&postprocess, sizeof(postprocess), cmd);
+
+            uint2 dispatch_dim;
+            dispatch_dim.x = postprocess.resolution.x;
+            dispatch_dim.y = postprocess.resolution.y;
+
+            device->Dispatch((dispatch_dim.x + 7u) / 8u, (dispatch_dim.y + 7u) / 8u, 1, cmd);
+
+            device->EventEnd(cmd);
+        }
+
+        if (VXGI_REFLECTIONS_ENABLED)
+        {
+            device->EventBegin("Specular", cmd);
+            device->BindComputeShader(&shaders[CSTYPE_VXGI_RESOLVE_SPECULAR], cmd);
+
+            PostProcess postprocess;
+            device->BindUAV(&res.specular, 0, cmd);
+            postprocess.resolution.x = res.specular.desc.width;
+            postprocess.resolution.y = res.specular.desc.height;
+            postprocess.resolution_rcp.x = 1.0f / postprocess.resolution.x;
+            postprocess.resolution_rcp.y = 1.0f / postprocess.resolution.y;
+            device->PushConstants(&postprocess, sizeof(postprocess), cmd);
+
+            uint2 dispatch_dim;
+            dispatch_dim.x = postprocess.resolution.x;
+            dispatch_dim.y = postprocess.resolution.y;
+
+            device->Dispatch((dispatch_dim.x + 7u) / 8u, (dispatch_dim.y + 7u) / 8u, 1, cmd);
+
+            device->EventEnd(cmd);
+        }
+
+        {
+            GPUBarrier barriers[] = {
+                GPUBarrier::Image(&res.diffuse, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+                GPUBarrier::Image(&res.specular, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
+            };
+            device->Barrier(barriers, arraysize(barriers), cmd);
+        }
+
+        wi::profiler::EndRange(range);
+        device->EventEnd(cmd);
+    }
+
+
+}
+
+namespace VCT
+{
+    RootSignature m_RootSig;
+    GraphicsPSO m_VoxelPSO(L"Renderer: Voxelization PSO"); // Not finalized.  Used as a template.
+
+    GraphicsPSO s_VCTVoxelizationVS(L"VCT: Voxelize VS");
+    GraphicsPSO s_VCTVoxelizationPS(L"VCT: Voxelize PS");
+
+    ComputePSO s_VCTLightInjectionCS(L"DOF: Pass 1 CS");
+    ComputePSO s_VCTGenMipmapCS(L"DOF: Pass 1 CS");
+
+    D3D12_RASTERIZER_DESC VoxelizationRasterizer;
+    D3D12_BLEND_DESC VoxelizationBlendDesc;
+
+    enum RootBindings
+    {
+        kMeshConstants,
+        kMaterialConstants,
+        kMaterialSRVs,
+        kMaterialSamplers,
+        kCommonSRVs,
+        kCommonCBV,
+        kCommoUAV,
+        kSkinMatrices,
+
+        kNumRootBindings
+    };
+
+    void Startup(Camera& camera, ModelH3D& model)
+    {
+        DXGI_FORMAT ColorFormat = g_SceneColorBuffer.GetFormat();
+        DXGI_FORMAT NormalFormat = g_SceneNormalBuffer.GetFormat();
+        DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();
+
+        D3D12_INPUT_ELEMENT_DESC vertElem[] =
+        {
+            {
+                "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            },
+            {
+                "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            },
+            {
+                "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            },
+            {
+                "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            },
+            {
+                "BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            }
+        };
+
         SamplerDesc DefaultSamplerDesc;
         DefaultSamplerDesc.MaxAnisotropy = 8;
 
@@ -111,21 +562,17 @@ namespace VCT
         m_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
         m_RootSig[kMeshConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
         m_RootSig[kMaterialConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig[kMaterialSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig[kMaterialSamplers].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kMaterialSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10,
+                                                       D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kMaterialSamplers].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, 10,
+                                                           D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10,
+                                                     D3D12_SHADER_VISIBILITY_PIXEL);
         m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
-        m_RootSig[kCommoUAV].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_RootSig[kCommoUAV].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10,
+                                                   D3D12_SHADER_VISIBILITY_PIXEL);
         m_RootSig[kSkinMatrices].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
         m_RootSig.Finalize(L"VoxelRootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-        D3D12_INPUT_ELEMENT_DESC posAndUV[] =
-        {
-            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-            { "TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        };
-
-        // Voxelization Rasterizer
 
         VoxelizationRasterizer.FillMode = D3D12_FILL_MODE_SOLID;
         VoxelizationRasterizer.CullMode = D3D12_CULL_MODE_NONE;
@@ -140,7 +587,7 @@ namespace VCT
         VoxelizationRasterizer.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON;
 
         VoxelizationBlendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        VoxelizationBlendDesc.RenderTarget[0].BlendEnable = TRUE;
+        VoxelizationBlendDesc.RenderTarget[0].BlendEnable = FALSE;
         VoxelizationBlendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
         VoxelizationBlendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
         VoxelizationBlendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_MAX;
@@ -149,150 +596,179 @@ namespace VCT
         VoxelizationBlendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_MAX;
         VoxelizationBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
-
-        // Voxelization PSO
-
         m_VoxelPSO.SetRootSignature(m_RootSig);
         m_VoxelPSO.SetRasterizerState(VoxelizationRasterizer);
-        m_VoxelPSO.SetBlendState(VoxelizationBlendDisable);
+        m_VoxelPSO.SetBlendState(VoxelizationBlendDesc);
         m_VoxelPSO.SetDepthStencilState(DepthStateDisabled);
-        m_VoxelPSO.SetInputLayout(0, nullptr);
+        m_VoxelPSO.SetInputLayout(_countof(vertElem), vertElem);
         m_VoxelPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
-        m_VoxelPSO.SetRenderTargetFormats(1, &ColorFormat, DepthFormat);
+        m_VoxelPSO.SetRenderTargetFormats(0, nullptr, DepthFormat);
         m_VoxelPSO.SetVertexShader(g_pVCTVoxelizationVS, sizeof(g_pVCTVoxelizationVS));
         m_VoxelPSO.SetPixelShader(g_pVCTVoxelizationPS, sizeof(g_pVCTVoxelizationPS));
 
 
-
-    }
-
-    void VCT::Shutdown(void)
-    {
-
-    }
-
-    void VCT::Render(ComputeContext& Context)
-    {
-
-    }
-
-    // 检查硬件是否支持 Conservative Rasterization
-    bool SupportsConservativeRaster(ID3D12Device* device)
-    {
-        D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
-        HRESULT hr = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options));
-        return SUCCEEDED(hr) && options.ConservativeRasterizationTier != D3D12_CONSERVATIVE_RASTERIZATION_TIER_NOT_SUPPORTED;
-    }
-
-    void VoxelConeTracer::Initialize()
-    {
-        // ... 创建 VoxelVolume ...
-
-        // 编译着色器
-        auto vs = g_pVoxelizationVS; // 从 .cso 加载
-        auto ps = g_pVoxelizationPS;
-
-        // 创建 Root Signature
-        RootSignature rs;
-        rs.Reset(2, 1); // 2 CBVs, 1 UAV
-        rs[0].InitAsConstantBuffer(0); // VoxelCB for VS
-        rs[1].InitAsConstantBuffer(1); // VoxelCB for PS
-        rs.SetPixelShaderResource(0, 0); // u0: UAV
-        rs.Finalize(L"Voxelization RS");
-
-        // 创建 PSO
-        GraphicsPSO pso;
-        pso.SetRootSignature(rs);
-        pso.SetRasterizerState(RasterizerDefault);
-        pso.SetBlendState(BlendDisable);
-        pso.SetDepthStencilState(DepthStateDisabled); // 不需要深度测试
-        pso.SetInputLayout(_countof(Model::Vertex::s_InputLayout), Model::Vertex::s_InputLayout);
-        pso.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
-        pso.SetVertexShader(vs);
-        pso.SetPixelShader(ps);
-
-        // === 关键：启用 Conservative Rasterization ===
-        if (SupportsConservativeRaster(Graphics::g_Device))
+        // The caller of this function can override which materials are considered cutouts
+        m_pMaterialIsCutout.resize(model.GetMaterialCount());
+        for (uint32_t i = 0; i < m_Model.GetMaterialCount(); ++i)
         {
-            D3D12_RASTERIZER_DESC& raster = pso.m_PSODesc.RasterizerState;
-            raster.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON;
+            const ModelH3D::Material& mat = m_Model.GetMaterial(i);
+            if (std::string(mat.texDiffusePath).find("thorn") != std::string::npos ||
+                std::string(mat.texDiffusePath).find("plant") != std::string::npos ||
+                std::string(mat.texDiffusePath).find("chain") != std::string::npos)
+            {
+                m_pMaterialIsCutout[i] = true;
+            }
+            else
+            {
+                m_pMaterialIsCutout[i] = false;
+            }
         }
 
-        // 注意：不设置 RenderTargetFormat！因为我们只写 UAV
-        pso.m_PSODesc.NumRenderTargets = 0; // ← 非常重要！
-
-        pso.Finalize();
-        m_VoxelizationPSO = pso;
-    }
-
-    void VoxelConeTracer::Voxelize(CommandContext& context, const Model& model)
-    {
-        // 清空体素体积（RGBA=0）
-        float clearColor[4] = { 0, 0, 0, 0 };
-        context.ClearColor(m_Volume.GetUAV(), clearColor);
-
-        struct VoxelView
+        if (!m_bInitialized)
         {
-            Vector3 dir, up;
-        } views[6] = {
-            {Vector3(1,0,0), Vector3(0,1,0)},
-            {Vector3(-1,0,0), Vector3(0,1,0)},
-            {Vector3(0,1,0), Vector3(0,0,-1)},
-            {Vector3(0,-1,0), Vector3(0,0,1)},
-            {Vector3(0,0,1), Vector3(0,1,0)},
-            {Vector3(0,0,-1), Vector3(0,1,0)}
-        };
+            m_bInitialized = true;
 
-        for (int i = 0; i < 6; ++i)
-        {
-            Vector3 eye = views[i].dir * 15.0f; // 相机位置
-            Math::Matrix4 view = Matrix4::LookAt(eye, Vector3::Zero, views[i].up);
-            Matrix4 proj = Matrix4::Orthographic(20.0f, 20.0f, 0.1f, 30.0f);
-            Matrix4 vp = proj * view;
-
-            VoxelCB cb;
-            cb.ViewProj = vp;
-            cb.VoxelWorldMin = Vector3(-10.0f, -10.0f, -10.0f);
-            cb.VoxelSize = 20.0f / 128.0f;
-            cb.CameraPos = eye;          // ← 关键：传入当前相机位置
-            cb.VoxelRes = 128;
-
-            context.SetPipelineState(m_VoxelizationPSO);
-            context.SetRootSignature(m_VoxelizationRS);
-
-            // b0 给 VS, b1 给 PS
-            context.SetDynamicConstantBufferView(0, sizeof(cb), &cb);
-            context.SetDynamicConstantBufferView(1, sizeof(cb), &cb);
-
-            context.TransitionResource(m_Volume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.SetRenderTargets(0, nullptr); // 无 RTV
-            context.SetDynamicDescriptor(0, m_Volume.GetUAV()); // u0
-
-            model.Draw(context);
+            // Each anisotropic voxel needs multiple values (per face = 6). Furthermore multiple clipmap regions are required.
+            // Per attribute everything is stored in one 3D texture:
+            // In X Direction -> voxelFace0,voxelFace1,...,voxelFace5
+            // In Y Direction -> clipmap L0,L1,...,Ln
+            // So the position in [0, resolution - 1]^3 of a specific inner texture is accessed by:
+            // samplePos(x, y, z, faceIndex, clipmapLevel) = (x, y, z) + (faceIndex, clipmapLevel, 0) * resolution
+            // To ensure correct interpolation at borders we thus need to extend the resolution of each inner texture
+            // by 2 in each dimension and copy in a dedicated render pass (WrapBorderPass) the border of the other side
+            // to get GL_REPEAT as the texture wrapping mode.
+            int resolutionWithBorder = VoxelResolution + 2;
+            g_voxelOpacity.Create(resolutionWithBorder * FaceCount, ClipRegionCount * resolutionWithBorder,
+                                  resolutionWithBorder, DXGI_FORMAT_R8G8B8A8_UNORM);
+            g_voxelRadiance.Create(resolutionWithBorder * FaceCount, ClipRegionCount * resolutionWithBorder,
+                                   resolutionWithBorder, DXGI_FORMAT_R8G8B8A8_UNORM);
         }
     }
 
-    void VCT::GenerateMipmaps(CommandContext& context)
+    void Cleanup(void)
     {
-        context.SetPipelineState(m_MipmapCS);
-        context.SetRootSignature(m_MipmapRS);
-
-        for (uint32_t level = 0; level < m_Volume.GetMipLevels() - 1; ++level)
+        if (m_bInitialized)
         {
-            uint32_t srcSize = m_Volume.GetSize() >> level;
-            uint32_t dstSize = srcSize / 2;
-
-            context.TransitionResource(m_Volume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.SetConstants(0, level); // 传入当前 level
-            context.SetDynamicDescriptor(1, m_Volume.GetUAV(level));     // src
-            context.SetDynamicDescriptor(2, m_Volume.GetUAV(level + 1));   // dst
-
-            context.Dispatch(Math::DivideByMultiple(dstSize, 4),
-                Math::DivideByMultiple(dstSize, 4),
-                Math::DivideByMultiple(dstSize, 4));
+            m_bInitialized = false;
+            g_voxelOpacity.Destroy();
+            g_voxelRadiance.Destroy();
         }
     }
 
+    void VoxelizeObjects(GraphicsContext& gfxContext, const ShadowCamera& SunShadow, const Matrix4& ViewProjMat,
+                         const Vector3& viewerPos, eObjectFilter Filter)
+    {
+        struct VSConstants
+        {
+            Matrix4 modelToProjection;
+            Matrix4 modelToShadow;
+            XMFLOAT3 viewerPos;
+        } vsConstants;
+        vsConstants.modelToProjection = ViewProjMat;
+        vsConstants.modelToShadow = SunShadow.GetShadowMatrix();
+        XMStoreFloat3(&vsConstants.viewerPos, viewerPos);
+
+        gfxContext.SetDynamicConstantBufferView(Renderer::kMeshConstants, sizeof(vsConstants), &vsConstants);
+
+        __declspec(align(16)) uint32_t materialIdx = 0xFFFFFFFFul;
+
+        uint32_t VertexStride = m_Model.GetVertexStride();
+
+        for (uint32_t meshIndex = 0; meshIndex < m_Model.GetMeshCount(); meshIndex++)
+        {
+            const ModelH3D::Mesh& mesh = m_Model.GetMesh(meshIndex);
+
+            uint32_t indexCount = mesh.indexCount;
+            uint32_t startIndex = mesh.indexDataByteOffset / sizeof(uint16_t);
+            uint32_t baseVertex = mesh.vertexDataByteOffset / VertexStride;
+
+            if (mesh.materialIndex != materialIdx)
+            {
+                if (m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kCutout) ||
+                    !m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kOpaque))
+                    continue;
+
+                materialIdx = mesh.materialIndex;
+                gfxContext.SetDescriptorTable(Renderer::kMaterialSRVs, m_Model.GetSRVs(materialIdx));
+
+                gfxContext.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(uint32_t), &materialIdx);
+            }
+
+            gfxContext.DrawIndexed(indexCount, startIndex, baseVertex);
+        }
+    }
+
+    void Voxelize(GraphicsContext& gfxContext, const Camera& camera, const ShadowCamera& shadowCamera,
+                  const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
+    {
+        gfxContext.TransitionResource(g_VoxelColorVolume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
+        gfxContext.TransitionResource(g_VoxelNormalVolume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
+        gfxContext.SetRenderTargets(0, nullptr);
+        gfxContext.SetViewportAndScissor(viewport, scissor);
+        {
+            gfxContext.SetPipelineState(m_VoxelPSO);
+            VoxelizeObjects(gfxContext, shadowCamera, m_OrthoCamera.GetVoxelMatrix(), camera.GetPosition(), kOpaque);
+            //gfxContext.SetPipelineState(m_CutoutShadowPSO);
+            //VoxelizeObjects(gfxContext, m_OrthoCamera, camera.GetPosition(), kCutout);
+        }
+        gfxContext.TransitionResource(g_VoxelColorVolume, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        gfxContext.TransitionResource(g_VoxelNormalVolume, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    }
+
+    void GenerateMipMaps(CommandContext& context)
+    {
+        //ComputeContext& Context = BaseContext.GetComputeContext();
+
+        //Context.SetRootSignature(Graphics::g_CommonRS);
+
+        //Context.TransitionResource(*this, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        //Context.SetDynamicDescriptor(1, 0, m_SRVHandle);
+
+        //for (uint32_t TopMip = 0; TopMip < m_NumMipMaps; )
+        //{
+        //    uint32_t SrcWidth = m_Width >> TopMip;
+        //    uint32_t SrcHeight = m_Height >> TopMip;
+        //    uint32_t DstWidth = SrcWidth >> 1;
+        //    uint32_t DstHeight = SrcHeight >> 1;
+
+        //    // Determine if the first downsample is more than 2:1.  This happens whenever
+        //    // the source width or height is odd.
+        //    uint32_t NonPowerOfTwo = (SrcWidth & 1) | (SrcHeight & 1) << 1;
+        //    if (m_Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+        //        Context.SetPipelineState(Graphics::g_GenerateMipsGammaPSO[NonPowerOfTwo]);
+        //    else
+        //        Context.SetPipelineState(Graphics::g_GenerateMipsLinearPSO[NonPowerOfTwo]);
+
+        //    // We can downsample up to four times, but if the ratio between levels is not
+        //    // exactly 2:1, we have to shift our blend weights, which gets complicated or
+        //    // expensive.  Maybe we can update the code later to compute sample weights for
+        //    // each successive downsample.  We use _BitScanForward to count number of zeros
+        //    // in the low bits.  Zeros indicate we can divide by two without truncating.
+        //    uint32_t AdditionalMips;
+        //    _BitScanForward((unsigned long*)&AdditionalMips,
+        //        (DstWidth == 1 ? DstHeight : DstWidth) | (DstHeight == 1 ? DstWidth : DstHeight));
+        //    uint32_t NumMips = 1 + (AdditionalMips > 3 ? 3 : AdditionalMips);
+        //    if (TopMip + NumMips > m_NumMipMaps)
+        //        NumMips = m_NumMipMaps - TopMip;
+
+        //    // These are clamped to 1 after computing additional mips because clamped
+        //    // dimensions should not limit us from downsampling multiple times.  (E.g.
+        //    // 16x1 -> 8x1 -> 4x1 -> 2x1 -> 1x1.)
+        //    if (DstWidth == 0)
+        //        DstWidth = 1;
+        //    if (DstHeight == 0)
+        //        DstHeight = 1;
+
+        //    Context.SetConstants(0, TopMip, NumMips, 1.0f / DstWidth, 1.0f / DstHeight);
+        //    Context.SetDynamicDescriptors(2, 0, NumMips, m_UAVHandle + TopMip + 1);
+        //    Context.Dispatch2D(DstWidth, DstHeight);
+
+        //    Context.InsertUAVBarrier(*this);
+
+        //    TopMip += NumMips;
+        //}
+
+        //Context.TransitionResource(*this, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+        //    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
 }
-
-

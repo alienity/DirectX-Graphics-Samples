@@ -24,6 +24,7 @@
 #include "ParticleEffects.h"
 #include "SponzaRenderer.h"
 #include "Renderer.h"
+#include "VoxelConeTracer.h"
 
 // From Model
 #include "ModelH3D.h"
@@ -155,6 +156,8 @@ void Sponza::Startup( Camera& Camera )
     Camera.SetEyeAtUp( eye, Vector3(kZero), Vector3(kYUnitVector) );
 
     Lighting::CreateRandomLights(m_Model.GetBoundingBox().GetMin(), m_Model.GetBoundingBox().GetMax());
+
+    VCT::Startup(Camera, m_Model);
 }
 
 const ModelH3D& Sponza::GetModel()
@@ -164,6 +167,8 @@ const ModelH3D& Sponza::GetModel()
 
 void Sponza::Cleanup( void )
 {
+    VCT::Cleanup();
+
     m_Model.Clear();
     Lighting::Shutdown();
     TextureManager::Shutdown();
@@ -295,6 +300,10 @@ void Sponza::RenderScene(
     };
 
     pfnSetupGraphicsState();
+    
+    VCT::Voxelize(gfxContext, camera, m_SunShadow, viewport, scissor);
+	
+	pfnSetupGraphicsState();
 
     RenderLightShadows(gfxContext, camera);
 

@@ -71,9 +71,21 @@
     <ClInclude Include="ModelH3D.h" />
     <ClInclude Include="ParticleEffects.h" />
     <ClInclude Include="Renderer.h" />
+    <ClInclude Include="Shaders\VoxelConeTracing\VCTAtomicOperations.hlsli" />
+    <ClInclude Include="Shaders\VoxelConeTracing\VCTCommon.hlsli" />
+    <ClInclude Include="Shaders\VoxelConeTracing\VCTConversion.hlsli" />
+    <ClInclude Include="Shaders\VoxelConeTracing\VCTintersection.hlsli" />
+    <ClInclude Include="Shaders\VoxelConeTracing\VCTSettings.hlsli" />
+    <ClInclude Include="Shaders\VoxelConeTracing\VCTVoxelization.hlsli" />
+    <ClInclude Include="Shaders\VoxelConeTracing\VCTVoxelizationCommon.hlsli" />
+    <ClInclude Include="Shaders\VoxelConeTracing\VCTVoxelizationFrag.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VXGICommon.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VXGIRenderer.hlsli" />
     <ClInclude Include="SponzaRenderer.h" />
     <ClInclude Include="TextureConvert.h" />
     <ClInclude Include="VoxelConeTracer.h" />
+    <ClInclude Include="VoxelConeTracing\Voxelization.h" />
+    <ClInclude Include="VoxelConeTracing\VoxelRegion.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Animation.cpp" />
@@ -88,9 +100,20 @@
     <ClCompile Include="ModelLoader.cpp" />
     <ClCompile Include="ParticleEffects.cpp" />
     <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="Shaders\VoxelConeTracing\VCTLightingPS.hlsl" />
+    <ClCompile Include="Shaders\VoxelConeTracing\VCTMipmapCS.hlsl" />
+    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationGeom.hlsli" />
+    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationGS.hlsl" />
+    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationPS.hlsl" />
+    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationVS.hlsl" />
+    <ClCompile Include="Shaders\VXGI\VXGIVoxelizationGS.hlsl" />
+    <ClCompile Include="Shaders\VXGI\VXGIVoxelizationPS.hlsl" />
+    <ClCompile Include="Shaders\VXGI\VXGIVoxelizationVS.hlsl" />
     <ClCompile Include="SponzaRenderer.cpp" />
     <ClCompile Include="TextureConvert.cpp" />
     <ClCompile Include="VoxelConeTracer.cpp" />
+    <ClCompile Include="VoxelConeTracing\Voxelization.cpp" />
+    <ClCompile Include="VoxelConeTracing\VoxelRegion.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -172,18 +195,6 @@
     </FxCompile>
     <FxCompile Include="Shaders\SkyboxVS.hlsl">
       <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\VCTLightingPS.hlsl" />
-    <FxCompile Include="Shaders\VCTLightInjectionCS.hlsl" />
-    <FxCompile Include="Shaders\VCTMipmapCS.hlsl" />
-    <FxCompile Include="Shaders\VCTVoxelizationGS.hlsl">
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Geometry</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\VCTVoxelizationPS.hlsl">
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\VCTVoxelizationVS.hlsl">
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
     </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

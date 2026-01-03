@@ -1,39 +1,39 @@
-#include "Common.hlsli"
+#ifndef CONSERVATIVE_VOXELIZATION
+#define CONSERVATIVE_VOXELIZATION
+#endif
 
+#include "../Common.hlsli"
+#include "VCTVoxelizationCommon.hlsli"
 
 struct GSInput
 {
     float4 position : SV_Position;
-    float3 worldPos : WorldPos;
+    float3 normalW : WorldPos;
     float2 texCoord : TexCoord0;
-    float3 viewDir : TexCoord1;
-    float3 shadowCoord : TexCoord2;
-    float3 normal : Normal;
-    float3 tangent : Tangent;
-    float3 bitangent : Bitangent;
-#if ENABLE_TRIANGLE_ID
-    uint vertexID : TexCoord3;
-#endif
 };
 
 struct GSOutput
 {
     float4 position : SV_Position;
-    float3 worldPos : WorldPos;
+    float3 normalW : WorldPos;
     float2 texCoord : TexCoord0;
-    float3 viewDir : TexCoord1;
-    float3 shadowCoord : TexCoord2;
-    float3 normal : Normal;
-    float3 tangent : Tangent;
-    float3 bitangent : Bitangent;
-#if ENABLE_TRIANGLE_ID
-    uint vertexID : TexCoord3;
-#endif
 };
+
+#define CONSERVATIVE_VOXELIZATION
+#include "VCTVoxelizationGeom.hlsli"
 
 [maxvertexcount(3)]
 void main(triangle GSInput input[3], inout TriangleStream<GSOutput> outputStream)
 {
+    float4 positionsClip[3];
+    ConservativeVoxelizationFragmentInput ;
+    cvGeometryPass(input, positionsClip);
+
+
+
+
+    
+    
     float3 p1 = input[1].worldPos - input[0].worldPos;
     float3 p2 = input[2].worldPos - input[0].worldPos;
     float3 p = abs(cross(p1, p2));
@@ -49,10 +49,7 @@ void main(triangle GSInput input[3], inout TriangleStream<GSOutput> outputStream
         output.normal = input[i].normal;
         output.tangent = input[i].tangent;
         output.bitangent = input[i].bitangent;
-#if ENABLE_TRIANGLE_ID
-		output.vertexID = input[i].vertexID;
-#endif
-        
+
         if (p.z > p.x && p.z > p.y)
         {
             output.position = float4(input[i].position.x, input[i].position.y, 0, 1);
