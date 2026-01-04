@@ -1,15 +1,16 @@
 #include "../Common.hlsli"
 #include "VXGIRenderer.hlsli"
 
-cbuffer VSConstants : register(b2)
+cbuffer VSConstants : register(b2, space1)
 {
     float4x4 modelMatrix;
     float4x4 modelMatrixIT;
+    int cameraIndex;
 };
 
 struct VSInput
 {
-    float3 position : POSITION;
+    float3 pos : POSITION;
     float2 texcoord0 : TEXCOORD;
     float3 normal : NORMAL;
     float3 tangent : TANGENT;
@@ -18,9 +19,9 @@ struct VSInput
 
 struct VSOutput
 {
-    float4 position : SV_Position;
-    float2 texCoord : TexCoord0;
-    float3 normalW : Normal;
+    float4 pos : SV_Position;
+    float2 uv : TexCoord0;
+    float3 N : Normal;
 #ifndef VOXELIZATION_GEOMETRY_SHADER_ENABLED
     float3 P : POSITION3D;
 #endif // VOXELIZATION_GEOMETRY_SHADER_ENABLED
@@ -29,22 +30,22 @@ struct VSOutput
 // [RootSignature(Voxelize_RootSig)]
 VSOutput main(VSInput input)
 {
-    VSOutput vsOutput;
+    VSOutput Out;
 
-    vsOutput.position = mul(modelMatrix, float4(input.position, 1.0f));
-    vsOutput.texCoord = input.texcoord0;
-    vsOutput.normalW = mul(modelMatrixIT, float4(input.normal, 0.0f)).xyz;
+    Out.pos = mul(modelMatrix, float4(input.pos, 1.0f));
+    Out.uv = input.texcoord0;
+    Out.N = mul(modelMatrixIT, float4(input.normal, 0.0f)).xyz;
 
 #ifndef VOXELIZATION_GEOMETRY_SHADER_ENABLED
-    vsOutput.P = vsOutput.position.xyz;
+    Out.P = Out.pos.xyz;
     
     VoxelClipMap clipmap = g_xFrameVoxel.vxgi.clipmaps[g_xVoxelizer.clipmap_index];
 
     // World space -> Voxel grid space:
-    vsOutput.position.xyz = (vsOutput.position.xyz - clipmap.center) / clipmap.voxelSize;
+    Out.pos.xyz = (Out.pos.xyz - clipmap.center) / clipmap.voxelSize;
 
     // Project onto dominant axis:
-    const uint frustum_index = input.GetInstancePointer().GetCameraIndex();
+    const uint frustum_index = cameraIndex;
     switch (frustum_index)
     {
     default:
@@ -73,7 +74,10 @@ VSOutput main(VSInput input)
         break;
     }
     
+	// Voxel grid space -> Clip space
+    Out.pos.xy *= g_xFrameVoxel.vxgi.resolution_rcp;
+    Out.pos.zw = 1;
 #endif
     
-    return vsOutput;
+    return Out;
 }

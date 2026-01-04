@@ -149,10 +149,148 @@ static const float3 DIFFUSE_CONE_DIRECTIONS[16] =
 };
 #endif
 
+static const float __hdrRange = 10.0f; // HDR to SDR packing scale
+static const uint MAX_VOXEL_RGB = 511; // 9 bits for RGB
+static const uint MAX_VOXEL_ALPHA = 31; // 5 bits for alpha (alpha is needed for atomic average)
+static const float DARK_PACKING_POW = 8; // improves precision for dark colors
+
+uint PackVoxelColor(in float4 color)
+{
+    color.rgb /= __hdrRange;
+    color = saturate(color);
+    color.rgb = pow(color.rgb, 1.0 / DARK_PACKING_POW);
+    uint retVal = 0;
+    retVal |= (uint) (color.r * MAX_VOXEL_RGB) << 0u;
+    retVal |= (uint) (color.g * MAX_VOXEL_RGB) << 9u;
+    retVal |= (uint) (color.b * MAX_VOXEL_RGB) << 18u;
+    retVal |= (uint) (color.a * MAX_VOXEL_ALPHA) << 27u;
+    return retVal;
+}
+
+float4 UnpackVoxelColor(in uint colorMask)
+{
+    float4 retVal;
+    retVal.r = (float) ((colorMask >> 0u) & MAX_VOXEL_RGB) / MAX_VOXEL_RGB;
+    retVal.g = (float) ((colorMask >> 9u) & MAX_VOXEL_RGB) / MAX_VOXEL_RGB;
+    retVal.b = (float) ((colorMask >> 18u) & MAX_VOXEL_RGB) / MAX_VOXEL_RGB;
+    retVal.a = (float) ((colorMask >> 27u) & MAX_VOXEL_ALPHA) / MAX_VOXEL_ALPHA;
+    retVal = saturate(retVal);
+    retVal.rgb = pow(retVal.rgb, DARK_PACKING_POW);
+    retVal.rgb *= __hdrRange;
+    return retVal;
+}
+
+uint PackVoxelChannel(float value)
+{
+    return uint(value * 1024);
+}
+float UnpackVoxelChannel(uint value)
+{
+    return float(value) / 1024.0f;
+}
 
 
 
 
+// attribute computation with barycentric interpolation
+//	a0 : attribute at triangle corner 0
+//	a1 : attribute at triangle corner 1
+//	a2 : attribute at triangle corner 2
+//  bary : (u,v) barycentrics [same as you get from raytracing]; w is computed as 1 - u - w
+//	computation can be also written as: p0 * w + p1 * u + p2 * v
+template<
+typename T>
+inline T attribute_at_bary(in T a0, in T a1, in T a2, in float2 bary)
+{
+    return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y));
+}
+template<
+typename T>
+inline T attribute_at_bary(in T a0, in T a1, in T a2, in half2 bary)
+{
+    return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y));
+}
+
+// bilinear interpolation of gathered values based on pixel fraction
+inline float bilinear(float4 gather, float2 pixel_frac)
+{
+    const float top_row = lerp(gather.w, gather.z, pixel_frac.x);
+    const float bottom_row = lerp(gather.x, gather.y, pixel_frac.x);
+    return lerp(top_row, bottom_row, pixel_frac.y);
+}
+inline half bilinear(half4 gather, half2 pixel_frac)
+{
+    const half top_row = lerp(gather.w, gather.z, pixel_frac.x);
+    const half bottom_row = lerp(gather.x, gather.y, pixel_frac.x);
+    return lerp(top_row, bottom_row, pixel_frac.y);
+}
+
+template<typename T>
+inline bool is_saturated(T a)
+{
+    return all(a == saturate(a));
+}
+
+inline uint align(uint value, uint alignment)
+{
+    return ((value + alignment - 1) / alignment) * alignment;
+}
+inline uint2 align(uint2 value, uint2 alignment)
+{
+    return ((value + alignment - 1) / alignment) * alignment;
+}
+inline uint3 align(uint3 value, uint3 alignment)
+{
+    return ((value + alignment - 1) / alignment) * alignment;
+}
+inline uint4 align(uint4 value, uint4 alignment)
+{
+    return ((value + alignment - 1) / alignment) * alignment;
+}
+
+
+
+// Octahedral encodings:
+//	Journal of Computer Graphics Techniques Vol. 3, No. 2, 2014 http://jcgt.org
+
+// Returns +/-1
+half2 signNotZero(half2 v)
+{
+    return half2((v.x >= 0.0) ? +1.0 : -1.0, (v.y >= 0.0) ? +1.0 : -1.0);
+}
+// Assume normalized input. Output is on [-1, 1] for each component.
+half2 encode_oct(in half3 v)
+{
+	// Project the sphere onto the octahedron, and then onto the xy plane
+    half2 p = v.xy * (1.0 / (abs(v.x) + abs(v.y) + abs(v.z)));
+	// Reflect the folds of the lower hemisphere over the diagonals
+    return (v.z <= 0.0) ? ((1.0 - abs(p.yx)) * signNotZero(p)) : p;
+}
+half3 decode_oct(half2 e)
+{
+    half3 v = half3(e.xy, 1.0 - abs(e.x) - abs(e.y));
+    if (v.z < 0)
+        v.xy = (1.0 - abs(v.yx)) * signNotZero(v.xy);
+    return normalize(v);
+}
+
+// Assume normalized input on +Z hemisphere.
+// Output is on [-1, 1].
+half2 encode_hemioct(in half3 v)
+{
+	// Project the hemisphere onto the hemi-octahedron,
+	// and then into the xy plane
+    half2 p = v.xy * (1.0 / (abs(v.x) + abs(v.y) + v.z));
+	// Rotate and scale the center diamond to the unit square
+    return half2(p.x + p.y, p.x - p.y);
+}
+half3 decode_hemioct(half2 e)
+{
+	// Rotate and scale the unit square back to the center diamond
+    half2 temp = half2(e.x + e.y, e.x - e.y) * 0.5;
+    half3 v = half3(temp, 1.0 - abs(temp.x) - abs(temp.y));
+    return normalize(v);
+}
 
 
 

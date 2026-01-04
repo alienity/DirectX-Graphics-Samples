@@ -1,70 +1,88 @@
-#ifndef CONSERVATIVE_VOXELIZATION
-#define CONSERVATIVE_VOXELIZATION
-#endif
-
 #include "../Common.hlsli"
-#include "VCTVoxelizationCommon.hlsli"
+#include "VXGIRenderer.hlsli"
 
 struct GSInput
 {
-    float4 position : SV_Position;
-    float3 normalW : WorldPos;
-    float2 texCoord : TexCoord0;
+    float4 pos : SV_Position;
+    float2 uv : TexCoord0;
+    float3 N : Normal;
+    float3 P : POSITION3D;
 };
 
 struct GSOutput
 {
-    float4 position : SV_Position;
-    float3 normalW : WorldPos;
-    float2 texCoord : TexCoord0;
+    float4 pos : SV_POSITION;
+    centroid float2 uv : TexCoord0;
+    centroid float3 N : NORMAL;
+    centroid float3 P : POSITION3D;
+
+#ifdef VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
+	nointerpolation float3 aabb_min : AABB_MIN;
+	nointerpolation float3 aabb_max : AABB_MAX;
+#endif // VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
 };
 
-#define CONSERVATIVE_VOXELIZATION
-#include "VCTVoxelizationGeom.hlsli"
-
 [maxvertexcount(3)]
-void main(triangle GSInput input[3], inout TriangleStream<GSOutput> outputStream)
+void main(
+	triangle GSInput input[3],
+	inout TriangleStream<GSOutput> outputStream
+)
 {
-    float4 positionsClip[3];
-    ConservativeVoxelizationFragmentInput ;
-    cvGeometryPass(input, positionsClip);
+    VoxelClipMap clipmap = g_xFrameVoxel.vxgi.clipmaps[g_xVoxelizer.clipmap_index];
 
+    float3 facenormal = abs(input[0].N + input[1].N + input[2].N);
+    uint maxi = facenormal[1] > facenormal[0] ? 1 : 0;
+    maxi = facenormal[2] > facenormal[maxi] ? 2 : maxi;
 
+    float3 aabb_min = min(input[0].pos.xyz, min(input[1].pos.xyz, input[2].pos.xyz));
+    float3 aabb_max = max(input[0].pos.xyz, max(input[1].pos.xyz, input[2].pos.xyz));
 
+    GSOutput output[3];
 
-    
-    
-    float3 p1 = input[1].worldPos - input[0].worldPos;
-    float3 p2 = input[2].worldPos - input[0].worldPos;
-    float3 p = abs(cross(p1, p2));
-    
-    [unroll]
-    for (uint i = 0; i < 3; ++i)
+    uint i = 0;
+    for (i = 0; i < 3; ++i)
     {
-        GSOutput output;
-        output.worldPos = input[i].worldPos;
-        output.texCoord = input[i].texCoord;
-        output.viewDir = input[i].viewDir;
-        output.shadowCoord = input[i].shadowCoord;
-        output.normal = input[i].normal;
-        output.tangent = input[i].tangent;
-        output.bitangent = input[i].bitangent;
+		// World space -> Voxel grid space:
+        output[i].pos.xyz = (input[i].pos.xyz - clipmap.center) / clipmap.voxelSize;
 
-        if (p.z > p.x && p.z > p.y)
+		// Project onto dominant axis:
+		[flatten]
+        if (maxi == 0)
         {
-            output.position = float4(input[i].position.x, input[i].position.y, 0, 1);
+            output[i].pos.xyz = output[i].pos.zyx;
         }
-        else if (p.x > p.y && p.x > p.z)
+        else if (maxi == 1)
         {
-            output.position = float4(input[i].position.y, input[i].position.z, 0, 1);
+            output[i].pos.xyz = output[i].pos.xzy;
         }
-        else
-        {
-            output.position = float4(input[i].position.x, input[i].position.z, 0, 1);
-        }
-        
-        outputStream.Append(output);
     }
-    
-    outputStream.RestartStrip();
+
+#ifdef VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
+	// Expand triangle to get fake Conservative Rasterization:
+	float2 side0N = normalize(output[1].pos.xy - output[0].pos.xy);
+	float2 side1N = normalize(output[2].pos.xy - output[1].pos.xy);
+	float2 side2N = normalize(output[0].pos.xy - output[2].pos.xy);
+	output[0].pos.xy += normalize(side2N - side0N);
+	output[1].pos.xy += normalize(side0N - side1N);
+	output[2].pos.xy += normalize(side1N - side2N);
+#endif // VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
+
+    for (i = 0; i < 3; ++i)
+    {
+		// Voxel grid space -> Clip space
+        output[i].pos.xy *= g_xFrameVoxel.vxgi.resolution_rcp;
+        output[i].pos.zw = 1;
+
+		// Append the rest of the parameters as is:
+        output[i].uv = input[i].uv;
+        output[i].N = input[i].N;
+        output[i].P = input[i].pos.xyz;
+
+#ifdef VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
+		output[i].aabb_min = aabb_min;
+		output[i].aabb_max = aabb_max;
+#endif // VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
+
+        outputStream.Append(output[i]);
+    }
 }

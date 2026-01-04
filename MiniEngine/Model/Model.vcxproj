@@ -106,9 +106,18 @@
     <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationGS.hlsl" />
     <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationPS.hlsl" />
     <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationVS.hlsl" />
-    <ClCompile Include="Shaders\VXGI\VXGIVoxelizationGS.hlsl" />
-    <ClCompile Include="Shaders\VXGI\VXGIVoxelizationPS.hlsl" />
-    <ClCompile Include="Shaders\VXGI\VXGIVoxelizationVS.hlsl" />
+    <FxCompile Include="Shaders\VXGI\VXGIVoxelizationGS.hlsl">
+      <FileType>Document</FileType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Geometry</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\VXGI\VXGIVoxelizationPS.hlsl">
+      <FileType>Document</FileType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\VXGI\VXGIVoxelizationVS.hlsl">
+      <FileType>Document</FileType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+    </FxCompile>
     <ClCompile Include="SponzaRenderer.cpp" />
     <ClCompile Include="TextureConvert.cpp" />
     <ClCompile Include="VoxelConeTracer.cpp" />

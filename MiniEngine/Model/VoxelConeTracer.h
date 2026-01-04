@@ -214,6 +214,68 @@ namespace VCT
     {
         VXGI vxgi;
     };
+
+    struct alignas(16) ShaderCamera
+    {
+        float4x4	view_projection;
+
+        float3		position;
+        uint		output_index; // viewport or rendertarget array index
+
+        float4		clip_plane;
+        float4		reflection_plane; // not clip plane (not reversed when camera is under), but the original plane
+
+        float3		forward;
+        float		z_near;
+
+        float3		up;
+        float		z_far;
+
+        float		z_near_rcp;
+        float		z_far_rcp;
+        float		z_range;
+        float		z_range_rcp;
+
+        float4x4	view;
+        float4x4	projection;
+        float4x4	inverse_view;
+        float4x4	inverse_projection;
+        float4x4	inverse_view_projection;
+
+        inline void init()
+        {
+            view_projection = {};
+            position = {};
+            output_index = 0;
+            clip_plane = {};
+            forward = {};
+            z_near = {};
+            up = {};
+            z_far = {};
+            z_near_rcp = {};
+            z_far_rcp = {};
+            z_range = {};
+            z_range_rcp = {};
+            view = {};
+            projection = {};
+            inverse_view = {};
+            inverse_projection = {};
+            inverse_view_projection = {};
+        }
+    };
+
+    struct alignas(16) CameraCB
+    {
+        ShaderCamera cameras[16];
+
+        inline void init()
+        {
+            for (int i = 0; i < 16; ++i)
+            {
+                cameras[i].init();
+            }
+        }
+    };
 }
 
 namespace VCT::Primitive
