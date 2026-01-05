@@ -5,6 +5,8 @@ struct GSInput
 {
     float4 pos : SV_Position;
     float2 uv : TexCoord0;
+    float3 viewDir : TexCoord1;
+    float3 shadowCoord : TexCoord2;
     float3 N : Normal;
     float3 P : POSITION3D;
 };
@@ -13,6 +15,8 @@ struct GSOutput
 {
     float4 pos : SV_POSITION;
     centroid float2 uv : TexCoord0;
+    centroid float3 viewDir : TexCoord1;
+    centroid float3 shadowCoord : TexCoord2;
     centroid float3 N : NORMAL;
     centroid float3 P : POSITION3D;
 
@@ -75,6 +79,8 @@ void main(
 
 		// Append the rest of the parameters as is:
         output[i].uv = input[i].uv;
+        output[i].viewDir = input[i].viewDir;
+        output[i].shadowCoord = input[i].shadowCoord;
         output[i].N = input[i].N;
         output[i].P = input[i].pos.xyz;
 

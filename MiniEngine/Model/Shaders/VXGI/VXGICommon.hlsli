@@ -3,8 +3,8 @@
 
 #define PASTE1(a, b) a##b
 #define PASTE(a, b) PASTE1(a, b)
-#define CBUFFER(name, slot) cbuffer name : register(PASTE(b, slot))
-#define CONSTANTBUFFER(name, type, slot) ConstantBuffer< type > name : register(PASTE(b, slot))
+#define CBUFFER(name, slot) cbuffer name : register(PASTE(b, slot), space1)
+#define CONSTANTBUFFER(name, type, slot) ConstantBuffer< type > name : register(PASTE(b, slot), space1)
 
 #define CBSLOT_RENDERER_FRAME					0
 #define CBSLOT_RENDERER_CAMERA					1
@@ -43,6 +43,7 @@ struct VXGI
         float3 uvw = diff * float3(0.5f, -0.5f, 0.5f) + 0.5f;
         return uvw;
     }
+
     float3 clipmap_to_world(in float3 uvw, in VoxelClipMap clipmap)
     {
         float3 P = uvw * 2 - 1;
