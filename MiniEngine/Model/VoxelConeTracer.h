@@ -622,6 +622,7 @@ namespace VCT
     };
 
     void CreateVXGIResources(VXGIResources& res, XMUINT2 resolution);
+    
     void VXGI_Voxelize(CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
                        ModelH3D& model, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
     // Resolve VXGI to screen

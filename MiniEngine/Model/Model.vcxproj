@@ -106,6 +106,7 @@
     <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationGS.hlsl" />
     <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationPS.hlsl" />
     <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationVS.hlsl" />
+    <FxCompile Include="Shaders\VXGI\VXGIOffsetprevCS.hlsl" />
     <FxCompile Include="Shaders\VXGI\VXGIVoxelizationGS.hlsl">
       <FileType>Document</FileType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Geometry</ShaderType>

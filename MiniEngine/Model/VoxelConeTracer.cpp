@@ -15,6 +15,7 @@
 #include "CompiledShaders/VXGIVoxelizationVS.h"
 #include "CompiledShaders/VXGIVoxelizationGS.h"
 #include "CompiledShaders/VXGIVoxelizationPS.h"
+#include "CompiledShaders/VXGIOffsetprevCS.h"
 
 
 using namespace Graphics;
@@ -130,8 +131,7 @@ namespace VCT
         return Desc;
     }
 
-    void OrthoVoxelCamera::UpdateMatrix(Vector3 ForwardDirection, Vector3 CameraCenter, Vector3 VoxelBounds,
-                                        float VoxelSize)
+    void OrthoVoxelCamera::UpdateMatrix(Vector3 ForwardDirection, Vector3 CameraCenter, Vector3 VoxelBounds, float VoxelSize)
     {
         SetLookDirection(ForwardDirection, Vector3(kZUnitVector));
 
@@ -157,8 +157,7 @@ namespace VCT
         Update();
 
         // Transform from clip space to texture space
-        m_VoxelMatrix = Matrix4(AffineTransform(Matrix3::MakeScale(0.5f, -0.5f, 1.0f), Vector3(0.5f, 0.5f, 0.0f))) *
-            m_ViewProjMatrix;
+        m_VoxelMatrix = Matrix4(AffineTransform(Matrix3::MakeScale(0.5f, -0.5f, 1.0f), Vector3(0.5f, 0.5f, 0.0f))) * m_ViewProjMatrix;
     }
 }
 
@@ -233,6 +232,284 @@ namespace VCT
     SceneGI scene_gi;
     VXGIResources vxgi_resources;
 
+    ByteAddressBuffer g_xFrameVoxel;
+    ByteAddressBuffer g_xVoxelizer;
+
+}
+
+namespace VCT
+{
+    RootSignature m_vxgi_voxel_RootSig;
+    GraphicsPSO m_vxgi_voxel_PSO(L"VXGI: Voxelization PSO");
+
+    RootSignature m_vxgi_offsetprev_RootSig;
+    ComputePSO m_vxgi_offsetprev_PSO(L"VXGI: OffsetPrev");
+
+    void Startup(Camera& camera, ModelH3D& model)
+    {
+        // DXGI_FORMAT ColorFormat = g_SceneColorBuffer.GetFormat();
+        // DXGI_FORMAT NormalFormat = g_SceneNormalBuffer.GetFormat();
+        DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();
+
+        D3D12_INPUT_ELEMENT_DESC vertElem[] =
+        {
+            {
+                "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            },
+            {
+                "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            },
+            {
+                "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            },
+            {
+                "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            },
+            {
+                "BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            }
+        };
+
+        SamplerDesc DefaultSamplerDesc;
+        DefaultSamplerDesc.MaxAnisotropy = 8;
+
+        SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
+        //CubeMapSamplerDesc.MaxLOD = 6.0f;
+
+        m_vxgi_voxel_RootSig.Reset(10, 3);
+        m_vxgi_voxel_RootSig[0].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL, 1);
+        m_vxgi_voxel_RootSig[1].InitAsConstantBuffer(3, D3D12_SHADER_VISIBILITY_ALL, 1);
+        m_vxgi_voxel_RootSig[2].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
+        m_vxgi_voxel_RootSig[3].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxel_RootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxel_RootSig[5].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxel_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxel_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxel_RootSig[8].InitAsConstantBuffer(1);
+        m_vxgi_voxel_RootSig[9].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
+        m_vxgi_voxel_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxel_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxel_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxel_RootSig.Finalize(L"VoxelRootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+        D3D12_RASTERIZER_DESC VoxelizationRasterizer;
+        VoxelizationRasterizer.FillMode = D3D12_FILL_MODE_SOLID;
+        VoxelizationRasterizer.CullMode = D3D12_CULL_MODE_NONE;
+        VoxelizationRasterizer.FrontCounterClockwise = TRUE;
+        VoxelizationRasterizer.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+        VoxelizationRasterizer.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+        VoxelizationRasterizer.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+        VoxelizationRasterizer.DepthClipEnable = FALSE;
+        VoxelizationRasterizer.MultisampleEnable = FALSE;
+        VoxelizationRasterizer.AntialiasedLineEnable = FALSE;
+        VoxelizationRasterizer.ForcedSampleCount = 0;
+        VoxelizationRasterizer.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON;
+
+        D3D12_BLEND_DESC VoxelizationBlendDesc;
+        VoxelizationBlendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        VoxelizationBlendDesc.RenderTarget[0].BlendEnable = FALSE;
+        VoxelizationBlendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+        VoxelizationBlendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+        VoxelizationBlendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_MAX;
+        VoxelizationBlendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        VoxelizationBlendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
+        VoxelizationBlendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_MAX;
+        VoxelizationBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+        m_vxgi_voxel_PSO.SetRootSignature(m_vxgi_voxel_RootSig);
+        m_vxgi_voxel_PSO.SetRasterizerState(VoxelizationRasterizer);
+        m_vxgi_voxel_PSO.SetBlendState(VoxelizationBlendDesc);
+        m_vxgi_voxel_PSO.SetDepthStencilState(DepthStateDisabled);
+        m_vxgi_voxel_PSO.SetInputLayout(_countof(vertElem), vertElem);
+        m_vxgi_voxel_PSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
+        m_vxgi_voxel_PSO.SetRenderTargetFormats(0, nullptr, DepthFormat);
+        m_vxgi_voxel_PSO.SetVertexShader(g_pVXGIVoxelizationVS, sizeof(g_pVXGIVoxelizationVS));
+        m_vxgi_voxel_PSO.SetGeometryShader(g_pVXGIVoxelizationGS, sizeof(g_pVXGIVoxelizationGS));
+        m_vxgi_voxel_PSO.SetPixelShader(g_pVXGIVoxelizationPS, sizeof(g_pVXGIVoxelizationPS));
+        m_vxgi_voxel_PSO.Finalize();
+
+
+        m_vxgi_offsetprev_RootSig.Reset(4, 3);
+        m_vxgi_offsetprev_RootSig[0].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL, 1);
+        m_vxgi_offsetprev_RootSig[1].InitAsConstantBuffer(3, D3D12_SHADER_VISIBILITY_ALL, 1);
+        m_vxgi_offsetprev_RootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 1, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_offsetprev_RootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_offsetprev_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_offsetprev_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_offsetprev_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_offsetprev_RootSig.Finalize(L"VXGIOffsetprevRootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+        m_vxgi_offsetprev_PSO.SetRootSignature(m_vxgi_offsetprev_RootSig);
+        m_vxgi_offsetprev_PSO.SetComputeShader(g_pVXGIOffsetprevCS, sizeof(g_pVXGIOffsetprevCS));
+        m_vxgi_offsetprev_PSO.Finalize();
+
+
+
+
+        
+        // The caller of this function can override which materials are considered cutouts
+        m_pMaterialIsCutout.resize(model.GetMaterialCount());
+        for (uint32_t i = 0; i < m_Model.GetMaterialCount(); ++i)
+        {
+            const ModelH3D::Material& mat = m_Model.GetMaterial(i);
+            if (std::string(mat.texDiffusePath).find("thorn") != std::string::npos ||
+                std::string(mat.texDiffusePath).find("plant") != std::string::npos ||
+                std::string(mat.texDiffusePath).find("chain") != std::string::npos)
+            {
+                m_pMaterialIsCutout[i] = true;
+            }
+            else
+            {
+                m_pMaterialIsCutout[i] = false;
+            }
+        }
+
+    }
+
+    void Cleanup(void)
+    {
+        if (vxgi_resources.IsValid())
+        {
+            vxgi_resources.diffuse.Destroy();
+            vxgi_resources.specular.Destroy();
+        }
+        g_xFrameVoxel.Destroy();
+        g_xVoxelizer.Destroy();
+    }
+
+    void VoxelizeObjects(GraphicsContext& gfxContext, const ShadowCamera& SunShadow, const Matrix4& ViewProjMat,
+                         const Vector3& viewerPos, eObjectFilter Filter)
+    {
+        struct VSConstants
+        {
+            Matrix4 modelToProjection;
+            Matrix4 modelToShadow;
+            XMFLOAT3 viewerPos;
+        } vsConstants;
+        vsConstants.modelToProjection = ViewProjMat;
+        vsConstants.modelToShadow = SunShadow.GetShadowMatrix();
+        XMStoreFloat3(&vsConstants.viewerPos, viewerPos);
+
+        gfxContext.SetDynamicConstantBufferView(Renderer::kMeshConstants, sizeof(vsConstants), &vsConstants);
+
+        __declspec(align(16)) uint32_t materialIdx = 0xFFFFFFFFul;
+
+        uint32_t VertexStride = m_Model.GetVertexStride();
+
+        for (uint32_t meshIndex = 0; meshIndex < m_Model.GetMeshCount(); meshIndex++)
+        {
+            const ModelH3D::Mesh& mesh = m_Model.GetMesh(meshIndex);
+
+            uint32_t indexCount = mesh.indexCount;
+            uint32_t startIndex = mesh.indexDataByteOffset / sizeof(uint16_t);
+            uint32_t baseVertex = mesh.vertexDataByteOffset / VertexStride;
+
+            if (mesh.materialIndex != materialIdx)
+            {
+                if (m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kCutout) ||
+                    !m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kOpaque))
+                    continue;
+
+                materialIdx = mesh.materialIndex;
+                gfxContext.SetDescriptorTable(Renderer::kMaterialSRVs, m_Model.GetSRVs(materialIdx));
+
+                gfxContext.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(uint32_t), &materialIdx);
+            }
+
+            gfxContext.DrawIndexed(indexCount, startIndex, baseVertex);
+        }
+
+
+        if (g_xFrameVoxel.GetResource() != nullptr)
+        {
+            g_xFrameVoxel.Create(L"g_xFrameVoxel", 1, sizeof(FrameVoxelCB));
+        }
+        if (g_xVoxelizer.GetResource() != nullptr)
+        {
+            g_xVoxelizer.Create(L"g_xVoxelizer", 1, sizeof(VoxelizerCB));
+        }
+    }
+
+    void Voxelize(GraphicsContext& gfxContext, const Camera& camera, const ShadowCamera& shadowCamera,
+                  const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
+    {
+        // gfxContext.TransitionResource(g_VoxelColorVolume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
+        // gfxContext.TransitionResource(g_VoxelNormalVolume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
+        // gfxContext.SetRenderTargets(0, nullptr);
+        // gfxContext.SetViewportAndScissor(viewport, scissor);
+        // {
+        //     gfxContext.SetPipelineState(m_VoxelPSO);
+        //     VoxelizeObjects(gfxContext, shadowCamera, m_OrthoCamera.GetVoxelMatrix(), camera.GetPosition(), kOpaque);
+        //     //gfxContext.SetPipelineState(m_CutoutShadowPSO);
+        //     //VoxelizeObjects(gfxContext, m_OrthoCamera, camera.GetPosition(), kCutout);
+        // }
+        // gfxContext.TransitionResource(g_VoxelColorVolume, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        // gfxContext.TransitionResource(g_VoxelNormalVolume, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    }
+
+    void GenerateMipMaps(CommandContext& context)
+    {
+        //ComputeContext& Context = BaseContext.GetComputeContext();
+
+        //Context.SetRootSignature(Graphics::g_CommonRS);
+
+        //Context.TransitionResource(*this, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        //Context.SetDynamicDescriptor(1, 0, m_SRVHandle);
+
+        //for (uint32_t TopMip = 0; TopMip < m_NumMipMaps; )
+        //{
+        //    uint32_t SrcWidth = m_Width >> TopMip;
+        //    uint32_t SrcHeight = m_Height >> TopMip;
+        //    uint32_t DstWidth = SrcWidth >> 1;
+        //    uint32_t DstHeight = SrcHeight >> 1;
+
+        //    // Determine if the first downsample is more than 2:1.  This happens whenever
+        //    // the source width or height is odd.
+        //    uint32_t NonPowerOfTwo = (SrcWidth & 1) | (SrcHeight & 1) << 1;
+        //    if (m_Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+        //        Context.SetPipelineState(Graphics::g_GenerateMipsGammaPSO[NonPowerOfTwo]);
+        //    else
+        //        Context.SetPipelineState(Graphics::g_GenerateMipsLinearPSO[NonPowerOfTwo]);
+
+        //    // We can downsample up to four times, but if the ratio between levels is not
+        //    // exactly 2:1, we have to shift our blend weights, which gets complicated or
+        //    // expensive.  Maybe we can update the code later to compute sample weights for
+        //    // each successive downsample.  We use _BitScanForward to count number of zeros
+        //    // in the low bits.  Zeros indicate we can divide by two without truncating.
+        //    uint32_t AdditionalMips;
+        //    _BitScanForward((unsigned long*)&AdditionalMips,
+        //        (DstWidth == 1 ? DstHeight : DstWidth) | (DstHeight == 1 ? DstWidth : DstHeight));
+        //    uint32_t NumMips = 1 + (AdditionalMips > 3 ? 3 : AdditionalMips);
+        //    if (TopMip + NumMips > m_NumMipMaps)
+        //        NumMips = m_NumMipMaps - TopMip;
+
+        //    // These are clamped to 1 after computing additional mips because clamped
+        //    // dimensions should not limit us from downsampling multiple times.  (E.g.
+        //    // 16x1 -> 8x1 -> 4x1 -> 2x1 -> 1x1.)
+        //    if (DstWidth == 0)
+        //        DstWidth = 1;
+        //    if (DstHeight == 0)
+        //        DstHeight = 1;
+
+        //    Context.SetConstants(0, TopMip, NumMips, 1.0f / DstWidth, 1.0f / DstHeight);
+        //    Context.SetDynamicDescriptors(2, 0, NumMips, m_UAVHandle + TopMip + 1);
+        //    Context.Dispatch2D(DstWidth, DstHeight);
+
+        //    Context.InsertUAVBarrier(*this);
+
+        //    TopMip += NumMips;
+        //}
+
+        //Context.TransitionResource(*this, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+        //    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+
+
     void CreateVXGIResources(VXGIResources& res, XMUINT2 resolution)
     {
         res.diffuse.Create(L"vxgi.diffuse", resolution.x, resolution.y, 1, DXGI_FORMAT_R11G11B10_FLOAT);
@@ -241,7 +518,7 @@ namespace VCT
     }
 
     void VXGI_Voxelize(CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
-                       ModelH3D& model, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
+        ModelH3D& model, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
     {
         scene_gi.Update(camera);
 
@@ -275,21 +552,31 @@ namespace VCT
             gfxContext.ClearUAV(scene_gi.vxgi.sdf_temp);
             gfxContext.ClearUAV(scene_gi.vxgi.render_atomic);
             scene_gi.vxgi.pre_clear = false;;
+            EngineProfiling::EndBlock(&gfxContext);
         }
         else
         {
             {
-                GPUBarrier barriers[] = {
-                    GPUBarrier::Image(&scene.vxgi.render_atomic, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
-                    GPUBarrier::Image(&scene.vxgi.prev_radiance, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
-                    GPUBarrier::Image(&scene.vxgi.sdf, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
-                    GPUBarrier::Image(&scene.vxgi.sdf_temp, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
-                };
-                device->Barrier(barriers, arraysize(barriers), cmd);
+                gfxContext.TransitionResource(scene_gi.vxgi.render_atomic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(scene_gi.vxgi.prev_radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(scene_gi.vxgi.sdf, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(scene_gi.vxgi.sdf_temp, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.FlushResourceBarriers();
             }
-            device->EventBegin("Atomic Clear", cmd);
-            device->ClearUAV(&scene.vxgi.render_atomic, 0, cmd);
-            device->EventEnd(cmd);
+
+            EngineProfiling::BeginBlock(L"Atomic Clear", &gfxContext);
+            gfxContext.ClearUAV(scene_gi.vxgi.render_atomic);
+            EngineProfiling::EndBlock(&gfxContext);
+
+            //device->EventBegin("Atomic Clear", cmd);
+            //device->ClearUAV(&scene.vxgi.render_atomic, 0, cmd);
+            //device->EventEnd(cmd);
+
+            EngineProfiling::BeginBlock(L"Offset Previous Voxels", &gfxContext);
+            gfxContext.SetRootSignature(m_vxgi_offsetprev_RootSig);
+            gfxContext.SetPipelineState(m_vxgi_offsetprev_PSO);
+            gfxContext.SetConstantBuffer(0, );
+            EngineProfiling::EndBlock(&gfxContext);
 
             device->EventBegin("Offset Previous Voxels", cmd);
             device->BindComputeShader(&shaders[CSTYPE_VXGI_OFFSETPREV], cmd);
@@ -500,286 +787,4 @@ namespace VCT
         device->EventEnd(cmd);
     }
 
-
-}
-
-namespace VCT
-{
-    RootSignature m_RootSig;
-    GraphicsPSO m_VoxelPSO(L"Renderer: Voxelization PSO"); // Not finalized.  Used as a template.
-
-    GraphicsPSO s_VCTVoxelizationVS(L"VCT: Voxelize VS");
-    GraphicsPSO s_VCTVoxelizationPS(L"VCT: Voxelize PS");
-
-    ComputePSO s_VCTLightInjectionCS(L"DOF: Pass 1 CS");
-    ComputePSO s_VCTGenMipmapCS(L"DOF: Pass 1 CS");
-
-    D3D12_RASTERIZER_DESC VoxelizationRasterizer;
-    D3D12_BLEND_DESC VoxelizationBlendDesc;
-
-    enum RootBindings
-    {
-        kMeshConstants,
-        kMaterialConstants,
-        kMaterialSRVs,
-        kMaterialSamplers,
-        kCommonSRVs,
-        kCommonCBV,
-        kCommoUAV,
-        kSkinMatrices,
-
-        kNumRootBindings
-    };
-
-    void Startup(Camera& camera, ModelH3D& model)
-    {
-        DXGI_FORMAT ColorFormat = g_SceneColorBuffer.GetFormat();
-        DXGI_FORMAT NormalFormat = g_SceneNormalBuffer.GetFormat();
-        DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();
-
-        D3D12_INPUT_ELEMENT_DESC vertElem[] =
-        {
-            {
-                "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            },
-            {
-                "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            },
-            {
-                "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            },
-            {
-                "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            },
-            {
-                "BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            }
-        };
-
-        SamplerDesc DefaultSamplerDesc;
-        DefaultSamplerDesc.MaxAnisotropy = 8;
-
-        SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
-        //CubeMapSamplerDesc.MaxLOD = 6.0f;
-
-        m_RootSig.Reset(kNumRootBindings, 3);
-        m_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig[kMeshConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
-        m_RootSig[kMaterialConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig[kMaterialSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10,
-                                                       D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig[kMaterialSamplers].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, 10,
-                                                           D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10,
-                                                     D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
-        m_RootSig[kCommoUAV].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10,
-                                                   D3D12_SHADER_VISIBILITY_PIXEL);
-        m_RootSig[kSkinMatrices].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
-        m_RootSig.Finalize(L"VoxelRootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-        VoxelizationRasterizer.FillMode = D3D12_FILL_MODE_SOLID;
-        VoxelizationRasterizer.CullMode = D3D12_CULL_MODE_NONE;
-        VoxelizationRasterizer.FrontCounterClockwise = TRUE;
-        VoxelizationRasterizer.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-        VoxelizationRasterizer.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-        VoxelizationRasterizer.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-        VoxelizationRasterizer.DepthClipEnable = FALSE;
-        VoxelizationRasterizer.MultisampleEnable = FALSE;
-        VoxelizationRasterizer.AntialiasedLineEnable = FALSE;
-        VoxelizationRasterizer.ForcedSampleCount = 0;
-        VoxelizationRasterizer.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON;
-
-        VoxelizationBlendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        VoxelizationBlendDesc.RenderTarget[0].BlendEnable = FALSE;
-        VoxelizationBlendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
-        VoxelizationBlendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
-        VoxelizationBlendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_MAX;
-        VoxelizationBlendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-        VoxelizationBlendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
-        VoxelizationBlendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_MAX;
-        VoxelizationBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
-        m_VoxelPSO.SetRootSignature(m_RootSig);
-        m_VoxelPSO.SetRasterizerState(VoxelizationRasterizer);
-        m_VoxelPSO.SetBlendState(VoxelizationBlendDesc);
-        m_VoxelPSO.SetDepthStencilState(DepthStateDisabled);
-        m_VoxelPSO.SetInputLayout(_countof(vertElem), vertElem);
-        m_VoxelPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
-        m_VoxelPSO.SetRenderTargetFormats(0, nullptr, DepthFormat);
-        m_VoxelPSO.SetVertexShader(g_pVCTVoxelizationVS, sizeof(g_pVCTVoxelizationVS));
-        m_VoxelPSO.SetPixelShader(g_pVCTVoxelizationPS, sizeof(g_pVCTVoxelizationPS));
-
-
-        // The caller of this function can override which materials are considered cutouts
-        m_pMaterialIsCutout.resize(model.GetMaterialCount());
-        for (uint32_t i = 0; i < m_Model.GetMaterialCount(); ++i)
-        {
-            const ModelH3D::Material& mat = m_Model.GetMaterial(i);
-            if (std::string(mat.texDiffusePath).find("thorn") != std::string::npos ||
-                std::string(mat.texDiffusePath).find("plant") != std::string::npos ||
-                std::string(mat.texDiffusePath).find("chain") != std::string::npos)
-            {
-                m_pMaterialIsCutout[i] = true;
-            }
-            else
-            {
-                m_pMaterialIsCutout[i] = false;
-            }
-        }
-
-        if (!m_bInitialized)
-        {
-            m_bInitialized = true;
-
-            // Each anisotropic voxel needs multiple values (per face = 6). Furthermore multiple clipmap regions are required.
-            // Per attribute everything is stored in one 3D texture:
-            // In X Direction -> voxelFace0,voxelFace1,...,voxelFace5
-            // In Y Direction -> clipmap L0,L1,...,Ln
-            // So the position in [0, resolution - 1]^3 of a specific inner texture is accessed by:
-            // samplePos(x, y, z, faceIndex, clipmapLevel) = (x, y, z) + (faceIndex, clipmapLevel, 0) * resolution
-            // To ensure correct interpolation at borders we thus need to extend the resolution of each inner texture
-            // by 2 in each dimension and copy in a dedicated render pass (WrapBorderPass) the border of the other side
-            // to get GL_REPEAT as the texture wrapping mode.
-            int resolutionWithBorder = VoxelResolution + 2;
-            g_voxelOpacity.Create(resolutionWithBorder * FaceCount, ClipRegionCount * resolutionWithBorder,
-                                  resolutionWithBorder, DXGI_FORMAT_R8G8B8A8_UNORM);
-            g_voxelRadiance.Create(resolutionWithBorder * FaceCount, ClipRegionCount * resolutionWithBorder,
-                                   resolutionWithBorder, DXGI_FORMAT_R8G8B8A8_UNORM);
-        }
-    }
-
-    void Cleanup(void)
-    {
-        if (m_bInitialized)
-        {
-            m_bInitialized = false;
-            g_voxelOpacity.Destroy();
-            g_voxelRadiance.Destroy();
-        }
-    }
-
-    void VoxelizeObjects(GraphicsContext& gfxContext, const ShadowCamera& SunShadow, const Matrix4& ViewProjMat,
-                         const Vector3& viewerPos, eObjectFilter Filter)
-    {
-        struct VSConstants
-        {
-            Matrix4 modelToProjection;
-            Matrix4 modelToShadow;
-            XMFLOAT3 viewerPos;
-        } vsConstants;
-        vsConstants.modelToProjection = ViewProjMat;
-        vsConstants.modelToShadow = SunShadow.GetShadowMatrix();
-        XMStoreFloat3(&vsConstants.viewerPos, viewerPos);
-
-        gfxContext.SetDynamicConstantBufferView(Renderer::kMeshConstants, sizeof(vsConstants), &vsConstants);
-
-        __declspec(align(16)) uint32_t materialIdx = 0xFFFFFFFFul;
-
-        uint32_t VertexStride = m_Model.GetVertexStride();
-
-        for (uint32_t meshIndex = 0; meshIndex < m_Model.GetMeshCount(); meshIndex++)
-        {
-            const ModelH3D::Mesh& mesh = m_Model.GetMesh(meshIndex);
-
-            uint32_t indexCount = mesh.indexCount;
-            uint32_t startIndex = mesh.indexDataByteOffset / sizeof(uint16_t);
-            uint32_t baseVertex = mesh.vertexDataByteOffset / VertexStride;
-
-            if (mesh.materialIndex != materialIdx)
-            {
-                if (m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kCutout) ||
-                    !m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kOpaque))
-                    continue;
-
-                materialIdx = mesh.materialIndex;
-                gfxContext.SetDescriptorTable(Renderer::kMaterialSRVs, m_Model.GetSRVs(materialIdx));
-
-                gfxContext.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(uint32_t), &materialIdx);
-            }
-
-            gfxContext.DrawIndexed(indexCount, startIndex, baseVertex);
-        }
-    }
-
-    void Voxelize(GraphicsContext& gfxContext, const Camera& camera, const ShadowCamera& shadowCamera,
-                  const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
-    {
-        gfxContext.TransitionResource(g_VoxelColorVolume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
-        gfxContext.TransitionResource(g_VoxelNormalVolume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
-        gfxContext.SetRenderTargets(0, nullptr);
-        gfxContext.SetViewportAndScissor(viewport, scissor);
-        {
-            gfxContext.SetPipelineState(m_VoxelPSO);
-            VoxelizeObjects(gfxContext, shadowCamera, m_OrthoCamera.GetVoxelMatrix(), camera.GetPosition(), kOpaque);
-            //gfxContext.SetPipelineState(m_CutoutShadowPSO);
-            //VoxelizeObjects(gfxContext, m_OrthoCamera, camera.GetPosition(), kCutout);
-        }
-        gfxContext.TransitionResource(g_VoxelColorVolume, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        gfxContext.TransitionResource(g_VoxelNormalVolume, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    }
-
-    void GenerateMipMaps(CommandContext& context)
-    {
-        //ComputeContext& Context = BaseContext.GetComputeContext();
-
-        //Context.SetRootSignature(Graphics::g_CommonRS);
-
-        //Context.TransitionResource(*this, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        //Context.SetDynamicDescriptor(1, 0, m_SRVHandle);
-
-        //for (uint32_t TopMip = 0; TopMip < m_NumMipMaps; )
-        //{
-        //    uint32_t SrcWidth = m_Width >> TopMip;
-        //    uint32_t SrcHeight = m_Height >> TopMip;
-        //    uint32_t DstWidth = SrcWidth >> 1;
-        //    uint32_t DstHeight = SrcHeight >> 1;
-
-        //    // Determine if the first downsample is more than 2:1.  This happens whenever
-        //    // the source width or height is odd.
-        //    uint32_t NonPowerOfTwo = (SrcWidth & 1) | (SrcHeight & 1) << 1;
-        //    if (m_Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
-        //        Context.SetPipelineState(Graphics::g_GenerateMipsGammaPSO[NonPowerOfTwo]);
-        //    else
-        //        Context.SetPipelineState(Graphics::g_GenerateMipsLinearPSO[NonPowerOfTwo]);
-
-        //    // We can downsample up to four times, but if the ratio between levels is not
-        //    // exactly 2:1, we have to shift our blend weights, which gets complicated or
-        //    // expensive.  Maybe we can update the code later to compute sample weights for
-        //    // each successive downsample.  We use _BitScanForward to count number of zeros
-        //    // in the low bits.  Zeros indicate we can divide by two without truncating.
-        //    uint32_t AdditionalMips;
-        //    _BitScanForward((unsigned long*)&AdditionalMips,
-        //        (DstWidth == 1 ? DstHeight : DstWidth) | (DstHeight == 1 ? DstWidth : DstHeight));
-        //    uint32_t NumMips = 1 + (AdditionalMips > 3 ? 3 : AdditionalMips);
-        //    if (TopMip + NumMips > m_NumMipMaps)
-        //        NumMips = m_NumMipMaps - TopMip;
-
-        //    // These are clamped to 1 after computing additional mips because clamped
-        //    // dimensions should not limit us from downsampling multiple times.  (E.g.
-        //    // 16x1 -> 8x1 -> 4x1 -> 2x1 -> 1x1.)
-        //    if (DstWidth == 0)
-        //        DstWidth = 1;
-        //    if (DstHeight == 0)
-        //        DstHeight = 1;
-
-        //    Context.SetConstants(0, TopMip, NumMips, 1.0f / DstWidth, 1.0f / DstHeight);
-        //    Context.SetDynamicDescriptors(2, 0, NumMips, m_UAVHandle + TopMip + 1);
-        //    Context.Dispatch2D(DstWidth, DstHeight);
-
-        //    Context.InsertUAVBarrier(*this);
-
-        //    TopMip += NumMips;
-        //}
-
-        //Context.TransitionResource(*this, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
-        //    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    }
 }

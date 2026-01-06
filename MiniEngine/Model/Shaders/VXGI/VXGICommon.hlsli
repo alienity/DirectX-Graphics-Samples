@@ -12,7 +12,11 @@
 
 // If enabled, geometry shader will be used to voxelize, and axis will be selected by geometry shader
 //	If disabled, vertex shader with instance replication will be used for each axis
-// #define VOXELIZATION_GEOMETRY_SHADER_ENABLED
+#define VOXELIZATION_GEOMETRY_SHADER_ENABLED
+
+// If enabled, conservative rasterization will be used to voxelize
+//	This can more accurately voxelize thin geometry, but slower
+//#define VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
 
 // Number of clipmaps, each doubling in size:
 static const uint VXGI_CLIPMAP_COUNT = 6;

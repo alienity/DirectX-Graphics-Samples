@@ -14,16 +14,8 @@ Texture3D<float4> input_previous_radiance : register(t14);
 
 cbuffer GlobalConstants : register(b1)
 {
-    float4x4 ViewProj;
-    float4x4 SunShadowMatrix;
-    float3 ViewerPos;
-    float _pad1;
-    float3 ViewerRight; // Right vector of orthographic camera
-    float _pad2;
-	float3 ViewerUp; // Up vector of orthographic camera
-    float _pad3;
-    float3 ViewerForward; // Forward vector of orthographic camera
-    float _pad4;
+	float4x4 modelToShadow;
+	float3 ViewerPos;
 }
 
 RWTexture3D<uint> output_atomic : register(u0);
@@ -61,8 +53,6 @@ struct PSInput
 {
     float4 pos : SV_POSITION;
     centroid float2 uv : TexCoord0;
-    centroid float3 viewDir : TexCoord1;
-    centroid float3 shadowCoord : TexCoord2;
     centroid float3 N : NORMAL;
     centroid float3 P : POSITION3D;
 
@@ -79,6 +69,7 @@ struct PSInput
     }
 };
 
+[RootSignature(Voxel_RootSig)]
 void main(PSInput input)
 {
     float2 uvset = input.uv;
@@ -102,6 +93,9 @@ void main(PSInput input)
 		return;
 #endif // VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
 
+	float3 viewDir = normalize(P - ViewerPos);
+	float3 shadowCoord = mul(modelToShadow, float4(P, 1.0)).xyz;
+	
     float4 baseColor = float4(1, 1, 1, 1);
     float lod_bias = 0;
     baseColor *= float4(texBaseColor.SampleBias(defaultSampler, uvset, lod_bias).rgb, 1.0f);
@@ -111,24 +105,6 @@ void main(PSInput input)
     emissiveColor *= emissiveMap.rgb * emissiveMap.a;
 
     float3 N = normalize(input.N);
-
-    /*
-    Lighting lighting;
-    lighting.create(0, 0, 0, 0);
-
-    Surface surface;
-    surface.init();
-    surface.P = P;
-    surface.N = N;
-    surface.create(material, baseColor, 0, 0);
-    surface.roughness = material.GetRoughness();
-    surface.sss = material.GetSSS();
-    surface.sss_inv = material.GetSSSInverse();
-    surface.layerMask = material.layerMask;
-    surface.update();
-
-    ForwardLighting(surface, lighting);
-    */
 
     uint2 pixelPos = uint2(input.pos.xy);
     float3 diffuseAlbedo = texBaseColor.Sample(defaultSampler, uvset);
@@ -141,8 +117,7 @@ void main(PSInput input)
     float gloss = 128.0;
     float3 specularAlbedo = float3(0.56, 0.56, 0.56);
     float specularMask = texSpecular.Sample(defaultSampler, uvset).g;
-    float3 viewDir = normalize(input.viewDir);
-    colorSum += ApplyDirectionalLight(diffuseAlbedo, specularAlbedo, specularMask, gloss, N, viewDir, SunDirection, SunColor, input.shadowCoord, texShadow);
+    colorSum += ApplyDirectionalLight(diffuseAlbedo, specularAlbedo, specularMask, gloss, N, viewDir, SunDirection, SunColor, shadowCoord, texShadow);
 
     ShadeLights(colorSum, pixelPos,
 		diffuseAlbedo,

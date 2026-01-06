@@ -5,8 +5,6 @@ cbuffer VSConstants : register(b0)
 {
     float4x4 modelMatrix;
     float4x4 modelMatrixIT;
-    float4x4 modelToShadow;
-    float3 ViewerPos;
     int cameraIndex;
 };
 
@@ -23,15 +21,13 @@ struct VSOutput
 {
     float4 pos : SV_Position;
     float2 uv : TexCoord0;
-    float3 viewDir : TexCoord1;
-    float3 shadowCoord : TexCoord2;
     float3 N : Normal;
 #ifndef VOXELIZATION_GEOMETRY_SHADER_ENABLED
     float3 P : POSITION3D;
 #endif // VOXELIZATION_GEOMETRY_SHADER_ENABLED
 };
 
-// [RootSignature(Voxelize_RootSig)]
+[RootSignature(Voxel_RootSig)]
 VSOutput main(VSInput input)
 {
     VSOutput Out;
@@ -39,9 +35,6 @@ VSOutput main(VSInput input)
     Out.pos = mul(modelMatrix, float4(input.pos, 1.0f));
     Out.uv = input.texcoord0;
     Out.N = mul(modelMatrixIT, float4(input.normal, 0.0f)).xyz;
-
-    Out.viewDir = Out.pos.xyz - ViewerPos;
-    Out.shadowCoord = mul(modelToShadow, float4(input.pos, 1.0)).xyz;
 
 #ifndef VOXELIZATION_GEOMETRY_SHADER_ENABLED
     Out.P = Out.pos.xyz;

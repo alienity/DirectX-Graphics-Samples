@@ -264,5 +264,8 @@
     <FxCompile Include="Shaders\VXGI\VXGIVoxelizationPS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\VXGI\VXGIOffsetprevCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
