@@ -2,6 +2,15 @@
 #include "../Lighting.hlsli"
 #include "VXGIRenderer.hlsli"
 
+struct InstanceCB
+{
+    float4x4 modelToShadow;
+    float3 viewerPos;
+    int _pad0;
+};
+
+CONSTANTBUFFER(g_xInstance, InstanceCB, CBSLOT_RENDERER_INSTANCE);
+
 Texture2D<float3> texBaseColor : register(t0);
 Texture2D<float3> texSpecular : register(t1);
 Texture2D<float4> texEmissive : register(t2);
@@ -12,13 +21,17 @@ Texture2D<float> texSSAO : register(t12);
 Texture2D<float> texShadow : register(t13);
 Texture3D<float4> input_previous_radiance : register(t14);
 
-cbuffer GlobalConstants : register(b1)
+RWTexture3D<uint> output_atomic : register(u0);
+
+float4x4 getModelToShadow()
 {
-	float4x4 modelToShadow;
-	float3 ViewerPos;
+    return g_xInstance.modelToShadow;
 }
 
-RWTexture3D<uint> output_atomic : register(u0);
+float3 getViewerPos()
+{
+    return g_xInstance.viewerPos;
+}
 
 void VoxelAtomicAverage(inout RWTexture3D<uint> output, in uint3 dest, in float4 color)
 {
@@ -93,8 +106,8 @@ void main(PSInput input)
 		return;
 #endif // VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
 
-	float3 viewDir = normalize(P - ViewerPos);
-	float3 shadowCoord = mul(modelToShadow, float4(P, 1.0)).xyz;
+	float3 viewDir = normalize(P - getViewerPos());
+	float3 shadowCoord = mul(getModelToShadow(), float4(P, 1.0)).xyz;
 	
     float4 baseColor = float4(1, 1, 1, 1);
     float lod_bias = 0;
@@ -231,67 +244,3 @@ void main(PSInput input)
 #endif
 
 }
-
-
-
-
-
-
-
-
-/*
-[RootSignature(Voxelize_RootSig)]
-void main(VSOutput vsOutput)
-{
-    if (!isInsideOrthoVolume(vsOutput.position))
-        return;
-
-    uint2 pixelPos = uint2(vsOutput.position.xy);
-#define SAMPLE_TEX(texName) texName.Sample(defaultSampler, vsOutput.uv)
-
-    float3 diffuseAlbedo = SAMPLE_TEX(texDiffuse);
-    float3 colorSum = 0;
-    {
-        float ao = texSSAO[pixelPos];
-        colorSum += ApplyAmbientLight(diffuseAlbedo, ao, AmbientColor);
-    }
-
-    float gloss = 128.0;
-    float3 normal;
-    {
-        normal = SAMPLE_TEX(texNormal) * 2.0 - 1.0;
-        AntiAliasSpecular(normal, gloss);
-        float3x3 tbn = float3x3(normalize(vsOutput.tangent), normalize(vsOutput.bitangent), normalize(vsOutput.normal));
-        normal = normalize(mul(normal, tbn));
-    }
-
-    float3 specularAlbedo = float3(0.56, 0.56, 0.56);
-    float specularMask = SAMPLE_TEX(texSpecular).g;
-    float3 viewDir = normalize(vsOutput.viewDir);
-    colorSum += ApplyDirectionalLight(diffuseAlbedo, specularAlbedo, specularMask, gloss, normal, viewDir, SunDirection, SunColor, vsOutput.shadowCoord, texShadow);
-
-    ShadeLights(colorSum, pixelPos,
-		diffuseAlbedo,
-		specularAlbedo,
-		specularMask,
-		gloss,
-		normal,
-		viewDir,
-		vsOutput.worldPos
-		);
-
-    
-    // Output lighting to 3D texture.
-    float3 voxel = scaleAndBias(vsOutput.position);
-    uint3 dim;
-    rwVoxelColorTexture.GetDimensions(dim.x, dim.y, dim.z);
-    int3 voxelCoord = (int3) (float3(dim) * voxel);
-    
-    // Clamp coordinates to texture bounds
-    voxelCoord = clamp(voxelCoord, int3(0, 0, 0), dim - 1);
-    
-    // Write to voxel texture
-    rwVoxelColorTexture[voxelCoord] = float4(colorSum, 1);
-    rwVoxelNormalTexture[voxelCoord] = float4(normal * 0.5f + 0.5f, 0);
-}
-*/

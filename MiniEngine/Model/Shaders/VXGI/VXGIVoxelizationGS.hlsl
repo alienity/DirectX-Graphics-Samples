@@ -1,4 +1,3 @@
-#include "../Common.hlsli"
 #include "VXGIRenderer.hlsli"
 
 struct GSInput

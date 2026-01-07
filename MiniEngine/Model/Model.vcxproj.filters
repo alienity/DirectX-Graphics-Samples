@@ -50,22 +50,13 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="VoxelConeTracing\Voxelization.cpp" />
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationVS.hlsl">
+    <ClCompile Include="Shaders\VXGI\VXGIResolveDiffuseCS.hlsl">
       <Filter>Shaders</Filter>
     </ClCompile>
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTLightingPS.hlsl">
+    <ClCompile Include="Shaders\VXGI\VXGIResolveSpecularCS.hlsl">
       <Filter>Shaders</Filter>
     </ClCompile>
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTMipmapCS.hlsl">
-      <Filter>Shaders</Filter>
-    </ClCompile>
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationGeom.hlsli">
-      <Filter>Shaders</Filter>
-    </ClCompile>
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationGS.hlsl">
-      <Filter>Shaders</Filter>
-    </ClCompile>
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationPS.hlsl">
+    <ClCompile Include="Shaders\VXGI\VXGISDFJumpfloodCS.hlsl">
       <Filter>Shaders</Filter>
     </ClCompile>
   </ItemGroup>
@@ -127,36 +118,13 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="VoxelConeTracing\Voxelization.h" />
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTAtomicOperations.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTCommon.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTConversion.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTintersection.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTSettings.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTVoxelization.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTVoxelizationCommon.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTVoxelizationFrag.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
     <ClInclude Include="Shaders\VXGI\VXGICommon.hlsli">
       <Filter>Shaders</Filter>
     </ClInclude>
     <ClInclude Include="Shaders\VXGI\VXGIRenderer.hlsli">
       <Filter>Shaders</Filter>
     </ClInclude>
+    <ClInclude Include="Shaders\VXGI\VoxelConeTracing.hlsli" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\Common.hlsli">
@@ -265,6 +233,9 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\VXGI\VXGIOffsetprevCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\VXGI\VXGITemporalCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

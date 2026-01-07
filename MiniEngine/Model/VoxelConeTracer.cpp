@@ -568,10 +568,6 @@ namespace VCT
             gfxContext.ClearUAV(scene_gi.vxgi.render_atomic);
             EngineProfiling::EndBlock(&gfxContext);
 
-            //device->EventBegin("Atomic Clear", cmd);
-            //device->ClearUAV(&scene.vxgi.render_atomic, 0, cmd);
-            //device->EventEnd(cmd);
-
             EngineProfiling::BeginBlock(L"Offset Previous Voxels", &gfxContext);
             gfxContext.SetRootSignature(m_vxgi_offsetprev_RootSig);
             gfxContext.SetPipelineState(m_vxgi_offsetprev_PSO);

@@ -1,12 +1,33 @@
-#include "../Common.hlsli"
 #include "VXGIRenderer.hlsli"
 
-cbuffer VSConstants : register(b0)
+struct InstanceCB
 {
     float4x4 modelMatrix;
     float4x4 modelMatrixIT;
     int cameraIndex;
+    int3 _pad0;
 };
+
+CONSTANTBUFFER(g_xInstance, InstanceCB, CBSLOT_RENDERER_INSTANCE);
+
+SamplerState defaultSampler : register(s10);
+SamplerComparisonState shadowSampler : register(s11);
+SamplerState cubeMapSampler : register(s12);
+
+float4x4 getModelMatrix()
+{
+    return g_xInstance.modelMatrix;
+}
+
+float4x4 getModelMatrixIT()
+{
+    return g_xInstance.modelMatrixIT;
+}
+
+int getCameraIndex()
+{
+    return g_xInstance.cameraIndex;
+}
 
 struct VSInput
 {
@@ -32,9 +53,9 @@ VSOutput main(VSInput input)
 {
     VSOutput Out;
 
-    Out.pos = mul(modelMatrix, float4(input.pos, 1.0f));
+    Out.pos = mul(getModelMatrix(), float4(input.pos, 1.0f));
     Out.uv = input.texcoord0;
-    Out.N = mul(modelMatrixIT, float4(input.normal, 0.0f)).xyz;
+    Out.N = mul(getModelMatrixIT(), float4(input.normal, 0.0f)).xyz;
 
 #ifndef VOXELIZATION_GEOMETRY_SHADER_ENABLED
     Out.P = Out.pos.xyz;
@@ -45,7 +66,7 @@ VSOutput main(VSInput input)
     Out.pos.xyz = (Out.pos.xyz - clipmap.center) / clipmap.voxelSize;
 
     // Project onto dominant axis:
-    const uint frustum_index = cameraIndex;
+    const uint frustum_index = getCameraIndex();
     switch (frustum_index)
     {
     default:

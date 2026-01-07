@@ -71,14 +71,7 @@
     <ClInclude Include="ModelH3D.h" />
     <ClInclude Include="ParticleEffects.h" />
     <ClInclude Include="Renderer.h" />
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTAtomicOperations.hlsli" />
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTCommon.hlsli" />
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTConversion.hlsli" />
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTintersection.hlsli" />
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTSettings.hlsli" />
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTVoxelization.hlsli" />
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTVoxelizationCommon.hlsli" />
-    <ClInclude Include="Shaders\VoxelConeTracing\VCTVoxelizationFrag.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VoxelConeTracing.hlsli" />
     <ClInclude Include="Shaders\VXGI\VXGICommon.hlsli" />
     <ClInclude Include="Shaders\VXGI\VXGIRenderer.hlsli" />
     <ClInclude Include="SponzaRenderer.h" />
@@ -100,12 +93,6 @@
     <ClCompile Include="ModelLoader.cpp" />
     <ClCompile Include="ParticleEffects.cpp" />
     <ClCompile Include="Renderer.cpp" />
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTLightingPS.hlsl" />
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTMipmapCS.hlsl" />
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationGeom.hlsli" />
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationGS.hlsl" />
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationPS.hlsl" />
-    <ClCompile Include="Shaders\VoxelConeTracing\VCTVoxelizationVS.hlsl" />
     <FxCompile Include="Shaders\VXGI\VXGIOffsetprevCS.hlsl" />
     <FxCompile Include="Shaders\VXGI\VXGIVoxelizationGS.hlsl">
       <FileType>Document</FileType>
@@ -118,6 +105,12 @@
     <FxCompile Include="Shaders\VXGI\VXGIVoxelizationVS.hlsl">
       <FileType>Document</FileType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+    </FxCompile>
+    <ClCompile Include="Shaders\VXGI\VXGIResolveDiffuseCS.hlsl" />
+    <ClCompile Include="Shaders\VXGI\VXGIResolveSpecularCS.hlsl" />
+    <ClCompile Include="Shaders\VXGI\VXGISDFJumpfloodCS.hlsl" />
+    <FxCompile Include="Shaders\VXGI\VXGITemporalCS.hlsl">
+      <FileType>Document</FileType>
     </FxCompile>
     <ClCompile Include="SponzaRenderer.cpp" />
     <ClCompile Include="TextureConvert.cpp" />

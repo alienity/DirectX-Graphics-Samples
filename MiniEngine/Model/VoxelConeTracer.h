@@ -608,8 +608,10 @@ namespace VCT
 
 namespace VCT
 {
-    extern BoolVar Enable;
-    extern BoolVar DebugDraw;
+    extern bool VXGI_ENABLED;              // VXGI启用状态
+    extern bool VXGI_REFLECTIONS_ENABLED;  // VXGI反射启用状态
+    extern bool VXGI_DEBUG;                // VXGI调试模式
+    extern int VXGI_DEBUG_CLIPMAP;         // VXGI调试体素贴图索引
 
     // VXGI: Voxel-based Global Illumination (voxel cone tracing-based)
     struct VXGIResources
