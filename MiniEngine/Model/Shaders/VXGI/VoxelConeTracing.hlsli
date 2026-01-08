@@ -44,7 +44,7 @@ inline float4 SampleVoxelClipMap(in Texture3D<half4> voxels, in float3 P, in uin
 // coneDirection:	world-space cone direction in the direction to perform the trace
 // coneAperture:	cone width
 // precomputed_direction : avoid 3x anisotropic weight sampling, and instead directly use a slice that has precomputed cone direction weighted data
-inline float4 ConeTrace(in Texture3D<half4> voxels, in Texture3D<half> texture_sdf, in float3 P, in float3 N, in float3 coneDirection, in float coneAperture, in float stepSize, uint precomputed_direction = 0)
+inline float4 ConeTrace(in Texture3D<half4> voxels, in Texture3D<half> texture_sdf, in float3 P, in float3 N, in float3 coneDirection, in float coneAperture, in float stepSize, bool use_sdf = false, uint precomputed_direction = 0)
 {
 	float3 color = 0;
 	float alpha = 0;
@@ -104,7 +104,7 @@ inline float4 ConeTrace(in Texture3D<half4> voxels, in Texture3D<half> texture_s
 		alpha += a * sam.a;
 
 		float stepSizeCurrent = stepSize;
-		// if (use_sdf)
+		if (use_sdf)
 		{
 			// half texel correction is applied to avoid sampling over current clipmap:
 			const float half_texel = 0.5 * g_xFrameVoxel.vxgi.resolution_rcp;
@@ -149,12 +149,16 @@ inline float4 ConeTraceDiffuse(in Texture3D<half4> voxels, in Texture3D<half> te
 	return amount;
 }
 
-/*
+inline min16uint2 GetTemporalAASampleRotation()
+{
+    return uint2(g_xFrameVoxel.temporalaa_samplerotation & 0xFF, (g_xFrameVoxel.temporalaa_samplerotation >> 8u) & 0xFF);
+}
+
 // voxels:			3D Texture containing voxel scene with direct diffuse lighting (or direct + secondary indirect bounce)
 // P:				world-space position of receiving surface
 // N:				world-space normal vector of receiving surface
 // V:				world-space view-vector (cameraPosition - P)
-inline float4 ConeTraceSpecular(in Texture3D<half4> voxels, in float3 P, in float3 N, in float3 V, in float roughness, in uint2 pixel)
+inline float4 ConeTraceSpecular(in Texture3D<half4> voxels, in Texture3D<half> texture_sdf, in float3 P, in float3 N, in float3 V, in float roughness, in uint2 pixel)
 {
 	float aperture = roughness;
 	float3 coneDirection = reflect(-V, N);
@@ -162,12 +166,11 @@ inline float4 ConeTraceSpecular(in Texture3D<half4> voxels, in float3 P, in floa
 	// some dithering to help with banding at large step size
 	P += coneDirection * (dither(pixel + GetTemporalAASampleRotation()) - 0.5) * g_xFrameVoxel.vxgi.stepsize;
 
-	float4 amount = ConeTrace(voxels, P, N, coneDirection, aperture, g_xFrameVoxel.vxgi.stepsize, true);
+	float4 amount = ConeTrace(voxels, texture_sdf, P, N, coneDirection, aperture, g_xFrameVoxel.vxgi.stepsize, true);
 	amount.rgb = max(0, amount.rgb);
 	amount.a = saturate(amount.a);
 
 	return amount;
-}
-*/
+} 
 
 #endif

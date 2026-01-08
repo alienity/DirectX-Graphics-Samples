@@ -8,8 +8,9 @@
     "CBV(b1, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
     "CBV(b2, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
     "CBV(b3, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 1), visibility = SHADER_VISIBILITY_ALL)," \
-	"DescriptorTable(UAV(u0, numDescriptors = 1), visibility = SHADER_VISIBILITY_ALL), " \
+    "DescriptorTable(SRV(t0, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL)," \
+	"DescriptorTable(UAV(u0, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL), " \
+    "StaticSampler(s9, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_ALL)," \
     "StaticSampler(s10, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)," \
     "StaticSampler(s11, visibility = SHADER_VISIBILITY_PIXEL," \
         "addressU = TEXTURE_ADDRESS_CLAMP," \
@@ -22,6 +23,8 @@
 
 Texture3D<half4> input_previous_radiance : register(t0);
 Texture3D<uint> input_render_atomic : register(t1);
+
+Texture3D<half> texture_sdf : register(t2);
 
 RWTexture3D<float4> output_radiance : register(u0);
 RWTexture3D<float> output_sdf : register(u1);
@@ -86,7 +89,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 				// // lighting.indirect.diffuse += GetAmbient(N) * (1 - trace.a);
 				// radiance.rgb *= lighting.direct.diffuse / PI + lighting.indirect.diffuse;
 				half3 directdiffuse = directLight;
-				half4 trace = ConeTraceDiffuse(input_previous_radiance, P, N);
+				half4 trace = ConeTraceDiffuse(input_previous_radiance, texture_sdf, P, N);
 				half3 indirectdiffuse = trace.rgb;
 				radiance.rgb *= directdiffuse / PI + indirectdiffuse;
 				

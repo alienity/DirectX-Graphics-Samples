@@ -124,7 +124,9 @@
     <ClInclude Include="Shaders\VXGI\VXGIRenderer.hlsli">
       <Filter>Shaders</Filter>
     </ClInclude>
-    <ClInclude Include="Shaders\VXGI\VoxelConeTracing.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VoxelConeTracing.hlsli">
+      <Filter>Shaders</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\Common.hlsli">

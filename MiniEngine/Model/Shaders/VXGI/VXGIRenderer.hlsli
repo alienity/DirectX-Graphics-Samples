@@ -5,6 +5,16 @@
 
 struct FrameVoxelCB
 {
+    uint options; // wi::renderer bool options packed into bitmask (OPTION_BIT_ values)
+    float time;
+    float time_previous;
+    float delta_time;
+
+    uint frame_count;
+    uint temporalaa_samplerotation;
+    int texture_shadowatlas_index;
+    int texture_shadowatlas_transparent_index;
+
     VXGI vxgi;
 };
 
