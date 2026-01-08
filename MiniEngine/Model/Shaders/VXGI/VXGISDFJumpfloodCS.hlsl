@@ -1,14 +1,15 @@
-#include "../Common.hlsli"
 #include "VXGIRenderer.hlsli"
 
-#define Offsetprev_RootSig \
+#define JumpFlood_RootSig \
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
     "CBV(b0, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
     "CBV(b1, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
     "CBV(b2, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
     "CBV(b3, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 1), visibility = SHADER_VISIBILITY_ALL)," \
-	"DescriptorTable(UAV(u0, numDescriptors = 1), visibility = SHADER_VISIBILITY_ALL), " \
+    "CBV(b999, space = 0, visibility = SHADER_VISIBILITY_ALL), " \
+    "DescriptorTable(SRV(t0, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL)," \
+	"DescriptorTable(UAV(u0, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL), " \
+    "StaticSampler(s9, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_ALL)," \
     "StaticSampler(s10, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)," \
     "StaticSampler(s11, visibility = SHADER_VISIBILITY_PIXEL," \
         "addressU = TEXTURE_ADDRESS_CLAMP," \
@@ -18,49 +19,55 @@
 	    "filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
     "StaticSampler(s12, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)"
 
+Texture3D<float> input_sdf : register(t0);
 
-Texture3D<float4> input_previous_radiance : register(t0);
-RWTexture3D<float4> output_radiance : register(u0);
+RWTexture3D<float> output_sdf : register(u0);
 
-[RootSignature(Offsetprev_RootSig)]
+struct Push
+{
+    float jump_size;
+};
+//PUSHCONSTANT(push, Push);
+ConstantBuffer<Push> push : register(b999);
+
+[RootSignature(JumpFlood_RootSig)]
 [numthreads(8, 8, 8)]
 void main(uint3 DTid : SV_DispatchThreadID)
 {
-    DTid.y += g_xVoxelizer.clipmap_index * g_xFrameVoxel.vxgi.resolution;
+    uint clipmap_start = g_xVoxelizer.clipmap_index * g_xFrameVoxel.vxgi.resolution;
+    uint clipmap_end = clipmap_start + g_xFrameVoxel.vxgi.resolution;
+    DTid.y += clipmap_start;
 
-	for (uint i = 0; i < 6 + DIFFUSE_CONE_COUNT; ++i)
-	{
-		uint3 dst = DTid;
-        dst.x += i * g_xFrameVoxel.vxgi.resolution;
+    VoxelClipMap clipmap = g_xFrameVoxel.vxgi.clipmaps[g_xVoxelizer.clipmap_index];
+    float voxelSize = clipmap.voxelSize;
 
-		float4 radiance_prev = 0;
+    float best_distance = input_sdf[DTid];
 
-		if (any(g_xVoxelizer.offsetfromPrevFrame))
-		{
-			int3 coord = dst - g_xVoxelizer.offsetfromPrevFrame;
-            int aniso_face_start_x = i * g_xFrameVoxel.vxgi.resolution;
-            int aniso_face_end_x = aniso_face_start_x + g_xFrameVoxel.vxgi.resolution;
-            int clipmap_face_start_y = g_xVoxelizer.clipmap_index * g_xFrameVoxel.vxgi.resolution;
-            int clipmap_face_end_y = clipmap_face_start_y + g_xFrameVoxel.vxgi.resolution;
+    for (int x = -1; x <= 1; ++x)
+    {
+        for (int y = -1; y <= 1; ++y)
+        {
+            for (int z = -1; z <= 1; ++z)
+            {
+                int3 offset = int3(x, y, z) * push.jump_size;
+                int3 pixel = DTid + offset;
+                if (
+					pixel.x >= 0 && pixel.x < g_xFrameVoxel.vxgi.resolution &&
+					pixel.y >= clipmap_start && pixel.y < clipmap_end &&
+					pixel.z >= 0 && pixel.z < g_xFrameVoxel.vxgi.resolution
+					)
+                {
+                    float sdf = input_sdf[pixel];
+                    float distance = sdf + length((float3) offset * voxelSize);
 
-			if (
-				coord.x >= aniso_face_start_x && coord.x < aniso_face_end_x &&
-				coord.y >= clipmap_face_start_y && coord.y < clipmap_face_end_y &&
-				coord.z >= 0 && coord.z < g_xFrameVoxel.vxgi.resolution
-				)
-			{
-				radiance_prev = input_previous_radiance[coord];
-			}
-			else
-			{
-				radiance_prev = 0;
-			}
-		}
-		else
-		{
-			radiance_prev = input_previous_radiance[dst];
-		}
+                    if (distance < best_distance)
+                    {
+                        best_distance = distance;
+                    }
+                }
+            }
+        }
+    }
 
-		output_radiance[dst] = radiance_prev;
-	}
+    output_sdf[DTid] = best_distance;
 }

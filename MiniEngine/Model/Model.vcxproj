@@ -108,7 +108,9 @@
     </FxCompile>
     <ClCompile Include="Shaders\VXGI\VXGIResolveDiffuseCS.hlsl" />
     <ClCompile Include="Shaders\VXGI\VXGIResolveSpecularCS.hlsl" />
-    <ClCompile Include="Shaders\VXGI\VXGISDFJumpfloodCS.hlsl" />
+    <FxCompile Include="Shaders\VXGI\VXGISDFJumpfloodCS.hlsl">
+      <FileType>Document</FileType>
+    </FxCompile>
     <FxCompile Include="Shaders\VXGI\VXGITemporalCS.hlsl">
       <FileType>Document</FileType>
     </FxCompile>
