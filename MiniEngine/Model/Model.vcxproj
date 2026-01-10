@@ -72,8 +72,14 @@
     <ClInclude Include="ParticleEffects.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="Shaders\VXGI\VoxelConeTracing.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VXGIColorSpaceUtility.hlsli" />
     <ClInclude Include="Shaders\VXGI\VXGICommon.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VXGIGlobal.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VXGIPixelPacking_R11G11B10.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VXGIPixelPacking_RGBE.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VXGIPostprocess.hlsli" />
     <ClInclude Include="Shaders\VXGI\VXGIRenderer.hlsli" />
+    <ClInclude Include="Shaders\VXGI\VXGISH_Lite.hlsli" />
     <ClInclude Include="SponzaRenderer.h" />
     <ClInclude Include="TextureConvert.h" />
     <ClInclude Include="VoxelConeTracer.h" />
@@ -106,8 +112,12 @@
       <FileType>Document</FileType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
     </FxCompile>
-    <ClCompile Include="Shaders\VXGI\VXGIResolveDiffuseCS.hlsl" />
-    <ClCompile Include="Shaders\VXGI\VXGIResolveSpecularCS.hlsl" />
+    <FxCompile Include="Shaders\VXGI\VXGIResolveDiffuseCS.hlsl">
+      <FileType>Document</FileType>
+    </FxCompile>
+    <FxCompile Include="Shaders\VXGI\VXGIResolveSpecularCS.hlsl">
+      <FileType>Document</FileType>
+    </FxCompile>
     <FxCompile Include="Shaders\VXGI\VXGISDFJumpfloodCS.hlsl">
       <FileType>Document</FileType>
     </FxCompile>

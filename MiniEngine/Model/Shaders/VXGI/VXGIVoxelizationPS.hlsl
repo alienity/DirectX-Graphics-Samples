@@ -9,7 +9,7 @@ struct InstanceCB
     int _pad0;
 };
 
-CONSTANTBUFFER(g_xInstance, InstanceCB, CBSLOT_RENDERER_INSTANCE);
+ConstantBuffer<InstanceCB> g_xInstance : register(b999);
 
 Texture2D<float3> texBaseColor : register(t0);
 Texture2D<float3> texSpecular : register(t1);
@@ -88,15 +88,15 @@ void main(PSInput input)
     float2 uvset = input.uv;
     float3 P = input.P;
 
-    VoxelClipMap clipmap = g_xFrameVoxel.vxgi.clipmaps[g_xVoxelizer.clipmap_index];
-    float3 uvw = g_xFrameVoxel.vxgi.world_to_clipmap(P, clipmap);
+    VoxelClipMap clipmap = g_xFrame.vxgi.clipmaps[g_xVoxelizer.clipmap_index];
+    float3 uvw = g_xFrame.vxgi.world_to_clipmap(P, clipmap);
     if (!is_saturated(uvw))
         return;
 
 #ifdef VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
-	uint3 clipmap_pixel = uvw * g_xFrameVoxel.vxgi.resolution;
-	float3 clipmap_uvw_center = (clipmap_pixel + 0.5) * g_xFrameVoxel.vxgi.resolution_rcp;
-	float3 voxel_center = g_xFrameVoxel.vxgi.clipmap_to_world(clipmap_uvw_center, clipmap);
+	uint3 clipmap_pixel = uvw * g_xFrame.vxgi.resolution;
+	float3 clipmap_uvw_center = (clipmap_pixel + 0.5) * g_xFrame.vxgi.resolution_rcp;
+	float3 voxel_center = g_xFrame.vxgi.clipmap_to_world(clipmap_uvw_center, clipmap);
 	AABB voxel_aabb;
 	voxel_aabb.c = voxel_center;
 	voxel_aabb.e = clipmap.voxelSize;
@@ -143,14 +143,14 @@ void main(PSInput input)
 		);
 
 	// output:
-    uint3 writecoord = floor(uvw * g_xFrameVoxel.vxgi.resolution);
+    uint3 writecoord = floor(uvw * g_xFrame.vxgi.resolution);
     writecoord.z *= VOXELIZATION_CHANNEL_COUNT; // de-interleaved channels
 
     float3 aniso_direction = N;
 
 #if 0
 	// This voxelization is faster but less accurate:
-	uint face_offset = cubemap_to_uv(aniso_direction).z * g_xFrameVoxel.vxgi.resolution;
+	uint face_offset = cubemap_to_uv(aniso_direction).z * g_xFrame.vxgi.resolution;
 	float4 baseColor_direction = baseColor;
 	float3 emissive_direction = emissiveColor;
 	float3 directLight_direction = lighting.direct.diffuse;
@@ -175,7 +175,7 @@ void main(PSInput input)
 		aniso_direction.x > 0 ? 0 : 1,
 		aniso_direction.y > 0 ? 2 : 3,
 		aniso_direction.z > 0 ? 4 : 5
-		) * g_xFrameVoxel.vxgi.resolution;
+		) * g_xFrame.vxgi.resolution;
     float3 direction_weights = abs(N);
 
     if (direction_weights.x > 0)

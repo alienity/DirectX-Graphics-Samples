@@ -92,10 +92,10 @@ namespace VCT
         float stepsize; // raymarch step size in voxel space units
         float max_distance; // maximum raymarch distance for voxel GI in world-space
 
-        int texture_radiance;
-        int texture_sdf;
-        int padding0;
-        int padding1;
+        //int texture_radiance;
+        //int texture_sdf;
+        //int padding0;
+        //int padding1;
 
         VoxelClipMap clipmaps[VXGI_CLIPMAP_COUNT];
 
@@ -210,11 +210,54 @@ namespace VCT
     };
 #endif
 
-    struct alignas(16) FrameVoxelCB
+    struct alignas(16) FrameCB
     {
+        uint options; // wi::renderer bool options packed into bitmask (OPTION_BIT_ values)
+        float time;
+        float time_previous;
+        float delta_time;
+
+        uint frame_count;
+        uint temporalaa_samplerotation;
+        int texture_shadowatlas_index;
+        int texture_shadowatlas_transparent_index;
+        
         VXGI vxgi;
     };
 
+    struct alignas(16) ShaderSphere
+    {
+        float3 center;
+        float radius;
+    };
+
+    struct alignas(16) ShaderClusterBounds
+    {
+        ShaderSphere sphere;
+
+        float3 cone_axis;
+        float cone_cutoff;
+    };
+    
+    struct alignas(16) ShaderFrustum
+    {
+        // Frustum planes:
+        //	0 : near
+        //	1 : far
+        //	2 : left
+        //	3 : right
+        //	4 : top
+        //	5 : bottom
+        float4 planes[6];
+    };
+
+    struct alignas(16) ShaderFrustumCorners
+    {
+        // topleft, topright, bottomleft, bottomright
+        float4 cornersNEAR[4];
+        float4 cornersFAR[4];
+    };
+    
     struct alignas(16) ShaderCamera
     {
         float4x4	view_projection;
@@ -242,6 +285,33 @@ namespace VCT
         float4x4	inverse_projection;
         float4x4	inverse_view_projection;
 
+        ShaderFrustum frustum;
+        ShaderFrustumCorners frustum_corners;
+
+        float2		temporalaa_jitter;
+        float2		temporalaa_jitter_prev;
+
+        float4x4	previous_view;
+        float4x4	previous_projection;
+        float4x4	previous_view_projection;
+        float4x4	previous_inverse_view_projection;
+        float4x4	reflection_view_projection;
+        float4x4	reflection_inverse_view_projection;
+        float4x4	reprojection; // view_projection_inverse_matrix * previous_view_projection_matrix
+
+        float2		aperture_shape;
+        float		aperture_size;
+        float		focal_length;
+
+        float2 canvas_size;
+        float2 canvas_size_rcp;
+		   
+        uint2 internal_resolution;
+        float2 internal_resolution_rcp;
+
+        uint4 scissor; // scissor in physical coordinates (left,top,right,bottom) range: [0, internal_resolution]
+        float4 scissor_uv; // scissor in screen UV coordinates (left,top,right,bottom) range: [0, 1]
+        
         inline void init()
         {
             view_projection = {};
@@ -608,10 +678,10 @@ namespace VCT
 
 namespace VCT
 {
-    extern bool VXGI_ENABLED;              // VXGIÆôÓÃ×´Ì¬
-    extern bool VXGI_REFLECTIONS_ENABLED;  // VXGI·´ÉäÆôÓÃ×´Ì¬
-    extern bool VXGI_DEBUG;                // VXGIµ÷ÊÔÄ£Ê½
-    extern int VXGI_DEBUG_CLIPMAP;         // VXGIµ÷ÊÔÌåËØÌùÍ¼Ë÷Òý
+    extern bool VXGI_ENABLED;              // VXGIï¿½ï¿½ï¿½ï¿½×´Ì¬
+    extern bool VXGI_REFLECTIONS_ENABLED;  // VXGIï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬
+    extern bool VXGI_DEBUG;                // VXGIï¿½ï¿½ï¿½ï¿½Ä£Ê½
+    extern int VXGI_DEBUG_CLIPMAP;         // VXGIï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¼ï¿½ï¿½ï¿½ï¿½
 
     // VXGI: Voxel-based Global Illumination (voxel cone tracing-based)
     struct VXGIResources

@@ -16,6 +16,8 @@
 #include "CompiledShaders/VXGIVoxelizationGS.h"
 #include "CompiledShaders/VXGIVoxelizationPS.h"
 #include "CompiledShaders/VXGIOffsetprevCS.h"
+#include "CompiledShaders/VXGIResolveDiffuseCS.h"
+#include "CompiledShaders/VXGIResolveSpecularCS.h"
 
 
 using namespace Graphics;
@@ -23,6 +25,11 @@ using namespace Math;
 
 namespace VCT
 {
+    // 添加VXGI渲染根签名和PSO
+    RootSignature m_vxgi_resolve_RootSig;
+    ComputePSO m_vxgi_resolve_diffuse_PSO(L"VXGI: Resolve Diffuse PSO");
+    ComputePSO m_vxgi_resolve_specular_PSO(L"VXGI: Resolve Specular PSO");
+
     LPCWSTR StringToLPCWSTR(const std::string& str)
     {
         int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), NULL, 0);
@@ -232,7 +239,7 @@ namespace VCT
     SceneGI scene_gi;
     VXGIResources vxgi_resources;
 
-    ByteAddressBuffer g_xFrameVoxel;
+    ByteAddressBuffer g_xFrame;
     ByteAddressBuffer g_xVoxelizer;
 
 }
@@ -348,10 +355,122 @@ namespace VCT
         m_vxgi_offsetprev_PSO.SetComputeShader(g_pVXGIOffsetprevCS, sizeof(g_pVXGIOffsetprevCS));
         m_vxgi_offsetprev_PSO.Finalize();
 
-
-
-
+        // 初始化VXGI解析阶段的根签名和PSO
+        // 对应VXGIRenderer.hlsli中的Voxel_RootSig
+        m_vxgi_resolve_RootSig.Reset(13, 10); // 13个根参数，10个静态采样器
         
+        // 根常量: 12个32位常量，寄存器b999，空间0
+        m_vxgi_resolve_RootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // CBV: b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_resolve_RootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+        
+        // CBV: b1, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_resolve_RootSig[2].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+        
+        // CBV: b0, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_resolve_RootSig[3].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // CBV: b1, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_resolve_RootSig[4].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // CBV: b2, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_resolve_RootSig[5].InitAsConstantBuffer(2, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // 描述符表: 包含CBV, SRV, UAV
+        // CBV(b3, space = 1, numDescriptors = 11)
+        m_vxgi_resolve_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 3, 11, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // SRV(t0, space = 0, numDescriptors = 16)
+        m_vxgi_resolve_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 16, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // UAV(u0, space = 0, numDescriptors = 16)
+        m_vxgi_resolve_RootSig[8].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 16, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // 添加额外的根参数以匹配Voxel_RootSig的完整定义
+        m_vxgi_resolve_RootSig[9].InitAsConstantBuffer(3, D3D12_SHADER_VISIBILITY_ALL, 1);
+        m_vxgi_resolve_RootSig[10].InitAsConstantBuffer(4, D3D12_SHADER_VISIBILITY_ALL, 1);
+        m_vxgi_resolve_RootSig[11].InitAsConstantBuffer(5, D3D12_SHADER_VISIBILITY_ALL, 1);
+        m_vxgi_resolve_RootSig[12].InitAsConstantBuffer(6, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // 静态采样器
+        SamplerDesc linearClampSamplerDesc = {};
+        linearClampSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        m_vxgi_resolve_RootSig.InitStaticSampler(100, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        SamplerDesc linearWrapSamplerDesc = linearClampSamplerDesc;
+        linearWrapSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        linearWrapSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        linearWrapSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        m_vxgi_resolve_RootSig.InitStaticSampler(101, linearWrapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        SamplerDesc linearMirrorSamplerDesc = linearClampSamplerDesc;
+        linearMirrorSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        linearMirrorSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        linearMirrorSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        m_vxgi_resolve_RootSig.InitStaticSampler(102, linearMirrorSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        SamplerDesc pointClampSamplerDesc = {};
+        pointClampSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        pointClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        pointClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        pointClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        m_vxgi_resolve_RootSig.InitStaticSampler(103, pointClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        SamplerDesc pointWrapSamplerDesc = pointClampSamplerDesc;
+        pointWrapSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        pointWrapSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        pointWrapSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        m_vxgi_resolve_RootSig.InitStaticSampler(104, pointWrapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        SamplerDesc pointMirrorSamplerDesc = pointClampSamplerDesc;
+        pointMirrorSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        pointMirrorSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        pointMirrorSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        m_vxgi_resolve_RootSig.InitStaticSampler(105, pointMirrorSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        SamplerDesc anisoClampSamplerDesc = {};
+        anisoClampSamplerDesc.Filter = D3D12_FILTER_ANISOTROPIC;
+        anisoClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        anisoClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        anisoClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        anisoClampSamplerDesc.MaxAnisotropy = 16;
+        m_vxgi_resolve_RootSig.InitStaticSampler(106, anisoClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        SamplerDesc anisoWrapSamplerDesc = anisoClampSamplerDesc;
+        anisoWrapSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        anisoWrapSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        anisoWrapSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        m_vxgi_resolve_RootSig.InitStaticSampler(107, anisoWrapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        SamplerDesc anisoMirrorSamplerDesc = anisoClampSamplerDesc;
+        anisoMirrorSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        anisoMirrorSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        anisoMirrorSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        m_vxgi_resolve_RootSig.InitStaticSampler(108, anisoMirrorSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        SamplerDesc comparisonSamplerDesc = {};
+        comparisonSamplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+        comparisonSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        comparisonSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        comparisonSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        comparisonSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+        m_vxgi_resolve_RootSig.InitStaticSampler(109, comparisonSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        m_vxgi_resolve_RootSig.Finalize(L"VXGIResolveRootSig", D3D12_ROOT_SIGNATURE_FLAG_NONE);
+        
+        // 设置解析着色器的PSO
+        m_vxgi_resolve_diffuse_PSO.SetRootSignature(m_vxgi_resolve_RootSig);
+        m_vxgi_resolve_diffuse_PSO.SetComputeShader(g_pVXGIResolveDiffuseCS, sizeof(g_pVXGIResolveDiffuseCS));
+        m_vxgi_resolve_diffuse_PSO.Finalize();
+        
+        m_vxgi_resolve_specular_PSO.SetRootSignature(m_vxgi_resolve_RootSig);
+        m_vxgi_resolve_specular_PSO.SetComputeShader(g_pVXGIResolveSpecularCS, sizeof(g_pVXGIResolveSpecularCS));
+        m_vxgi_resolve_specular_PSO.Finalize();
+
         // The caller of this function can override which materials are considered cutouts
         m_pMaterialIsCutout.resize(model.GetMaterialCount());
         for (uint32_t i = 0; i < m_Model.GetMaterialCount(); ++i)
@@ -378,7 +497,7 @@ namespace VCT
             vxgi_resources.diffuse.Destroy();
             vxgi_resources.specular.Destroy();
         }
-        g_xFrameVoxel.Destroy();
+        g_xFrame.Destroy();
         g_xVoxelizer.Destroy();
     }
 
@@ -425,9 +544,9 @@ namespace VCT
         }
 
 
-        if (g_xFrameVoxel.GetResource() != nullptr)
+        if (g_xFrame.GetResource() != nullptr)
         {
-            g_xFrameVoxel.Create(L"g_xFrameVoxel", 1, sizeof(FrameVoxelCB));
+            g_xFrame.Create(L"g_xFrame", 1, sizeof(FrameCB));
         }
         if (g_xVoxelizer.GetResource() != nullptr)
         {

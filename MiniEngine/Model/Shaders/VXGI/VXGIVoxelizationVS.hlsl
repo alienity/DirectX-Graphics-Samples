@@ -8,11 +8,7 @@ struct InstanceCB
     int3 _pad0;
 };
 
-CONSTANTBUFFER(g_xInstance, InstanceCB, CBSLOT_RENDERER_INSTANCE);
-
-SamplerState defaultSampler : register(s10);
-SamplerComparisonState shadowSampler : register(s11);
-SamplerState cubeMapSampler : register(s12);
+ConstantBuffer<InstanceCB> g_xInstance : register(b999);
 
 float4x4 getModelMatrix()
 {
@@ -60,7 +56,7 @@ VSOutput main(VSInput input)
 #ifndef VOXELIZATION_GEOMETRY_SHADER_ENABLED
     Out.P = Out.pos.xyz;
     
-    VoxelClipMap clipmap = g_xFrameVoxel.vxgi.clipmaps[g_xVoxelizer.clipmap_index];
+    VoxelClipMap clipmap = g_xFrame.vxgi.clipmaps[g_xVoxelizer.clipmap_index];
 
     // World space -> Voxel grid space:
     Out.pos.xyz = (Out.pos.xyz - clipmap.center) / clipmap.voxelSize;
@@ -96,7 +92,7 @@ VSOutput main(VSInput input)
     }
     
 	// Voxel grid space -> Clip space
-    Out.pos.xy *= g_xFrameVoxel.vxgi.resolution_rcp;
+    Out.pos.xy *= g_xFrame.vxgi.resolution_rcp;
     Out.pos.zw = 1;
 #endif
     

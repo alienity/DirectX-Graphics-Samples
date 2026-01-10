@@ -4,27 +4,35 @@
 
 #define Temporal_RootSig \
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
-    "CBV(b0, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
-    "CBV(b1, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
-    "CBV(b2, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
-    "CBV(b3, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL)," \
-	"DescriptorTable(UAV(u0, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL), " \
-    "StaticSampler(s9, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_ALL)," \
+	"RootConstants(num32BitConstants=12, b999), " \
+	"CBV(b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL), " \
+	"CBV(b1, space = 0, visibility = SHADER_VISIBILITY_PIXEL), " \
+	"CBV(b0, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
+	"CBV(b1, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
+	"CBV(b2, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
+    "DescriptorTable(CBV(b3, space = 1, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL)," \
+    "DescriptorTable(SRV(t0, numDescriptors = 20), visibility = SHADER_VISIBILITY_ALL)," \
+    "DescriptorTable(UAV(u0, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL)," \
     "StaticSampler(s10, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)," \
-    "StaticSampler(s11, visibility = SHADER_VISIBILITY_PIXEL," \
-        "addressU = TEXTURE_ADDRESS_CLAMP," \
-        "addressV = TEXTURE_ADDRESS_CLAMP," \
-        "addressW = TEXTURE_ADDRESS_CLAMP," \
-	    "comparisonFunc = COMPARISON_GREATER_EQUAL," \
-	    "filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
-    "StaticSampler(s12, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)"
+    "StaticSampler(s11, visibility = SHADER_VISIBILITY_PIXEL, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, comparisonFunc = COMPARISON_GREATER_EQUAL, filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
+    "StaticSampler(s12, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL), " \
+    "StaticSampler(s100, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
+    "StaticSampler(s101, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
+    "StaticSampler(s102, addressU = TEXTURE_ADDRESS_MIRROR, addressV = TEXTURE_ADDRESS_MIRROR, addressW = TEXTURE_ADDRESS_MIRROR, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
+    "StaticSampler(s103, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_MIN_MAG_MIP_POINT)," \
+    "StaticSampler(s104, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_MIN_MAG_MIP_POINT)," \
+    "StaticSampler(s105, addressU = TEXTURE_ADDRESS_MIRROR, addressV = TEXTURE_ADDRESS_MIRROR, addressW = TEXTURE_ADDRESS_MIRROR, filter = FILTER_MIN_MAG_MIP_POINT)," \
+    "StaticSampler(s106, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_ANISOTROPIC, maxAnisotropy = 16)," \
+    "StaticSampler(s107, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_ANISOTROPIC, maxAnisotropy = 16)," \
+    "StaticSampler(s108, addressU = TEXTURE_ADDRESS_MIRROR, addressV = TEXTURE_ADDRESS_MIRROR, addressW = TEXTURE_ADDRESS_MIRROR, filter = FILTER_ANISOTROPIC, maxAnisotropy = 16)," \
+    "StaticSampler(s109, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, comparisonFunc = COMPARISON_GREATER_EQUAL),"
 
 
-Texture3D<half4> input_previous_radiance : register(t0);
+
+Texture3D<float4> input_previous_radiance : register(t0);
 Texture3D<uint> input_render_atomic : register(t1);
 
-Texture3D<half> texture_sdf : register(t2);
+Texture3D<float> texture_sdf : register(t2);
 
 RWTexture3D<float4> output_radiance : register(u0);
 RWTexture3D<float> output_sdf : register(u1);
@@ -37,16 +45,16 @@ void main(uint3 DTid : SV_DispatchThreadID)
 {
 	float4 aniso_colors[6];
 
-	VoxelClipMap clipmap = g_xFrameVoxel.vxgi.clipmaps[g_xVoxelizer.clipmap_index];
-	float sdf = clipmap.voxelSize * 2 * g_xFrameVoxel.vxgi.resolution;
+	VoxelClipMap clipmap = g_xFrame.vxgi.clipmaps[g_xVoxelizer.clipmap_index];
+	float sdf = clipmap.voxelSize * 2 * g_xFrame.vxgi.resolution;
 
 	for (uint i = 0; i < 6 + DIFFUSE_CONE_COUNT; ++i)
 	{
 		uint3 src = DTid;
-		src.x += i * g_xFrameVoxel.vxgi.resolution;
+		src.x += i * g_xFrame.vxgi.resolution;
 
 		uint3 dst = src;
-		dst.y += g_xVoxelizer.clipmap_index * g_xFrameVoxel.vxgi.resolution;
+		dst.y += g_xVoxelizer.clipmap_index * g_xFrame.vxgi.resolution;
 
 		half4 radiance = 0;
 		if (i < 6)
@@ -80,7 +88,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 				radiance = baseColor;
 
 				// Voxel indirect lighting:
-				float3 P = g_xFrameVoxel.vxgi.clipmap_to_world((DTid + 0.5) * g_xFrameVoxel.vxgi.resolution_rcp, clipmap);
+				float3 P = g_xFrame.vxgi.clipmap_to_world((DTid + 0.5) * g_xFrame.vxgi.resolution_rcp, clipmap);
 				// Lighting lighting;
 				// lighting.create(0, 0, 0, 0);
 				// lighting.direct.diffuse = directLight;
@@ -101,15 +109,15 @@ void main(uint3 DTid : SV_DispatchThreadID)
 				if (any(g_xVoxelizer.offsetfromPrevFrame))
 				{
 					int3 coord = dst - g_xVoxelizer.offsetfromPrevFrame;
-					int aniso_face_start_x = i * g_xFrameVoxel.vxgi.resolution;
-					int aniso_face_end_x = aniso_face_start_x + g_xFrameVoxel.vxgi.resolution;
-					int clipmap_face_start_y = g_xVoxelizer.clipmap_index * g_xFrameVoxel.vxgi.resolution;
-					int clipmap_face_end_y = clipmap_face_start_y + g_xFrameVoxel.vxgi.resolution;
+					int aniso_face_start_x = i * g_xFrame.vxgi.resolution;
+					int aniso_face_end_x = aniso_face_start_x + g_xFrame.vxgi.resolution;
+					int clipmap_face_start_y = g_xVoxelizer.clipmap_index * g_xFrame.vxgi.resolution;
+					int clipmap_face_end_y = clipmap_face_start_y + g_xFrame.vxgi.resolution;
 
 					if (
 						coord.x >= aniso_face_start_x && coord.x < aniso_face_end_x &&
 						coord.y >= clipmap_face_start_y && coord.y < clipmap_face_end_y &&
-						coord.z >= 0 && coord.z < g_xFrameVoxel.vxgi.resolution
+						coord.z >= 0 && coord.z < g_xFrame.vxgi.resolution
 						)
 					{
 						radiance = lerp(input_previous_radiance[dst], radiance, blend_speed);
@@ -154,6 +162,6 @@ void main(uint3 DTid : SV_DispatchThreadID)
 	}
 
 	uint3 dst_sdf = DTid;
-	dst_sdf.y += g_xVoxelizer.clipmap_index * g_xFrameVoxel.vxgi.resolution;
+	dst_sdf.y += g_xVoxelizer.clipmap_index * g_xFrame.vxgi.resolution;
 	output_sdf[dst_sdf] = sdf;
 }

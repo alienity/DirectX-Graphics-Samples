@@ -26,27 +26,27 @@ RWTexture3D<float4> output_radiance : register(u0);
 [numthreads(8, 8, 8)]
 void main(uint3 DTid : SV_DispatchThreadID)
 {
-    DTid.y += g_xVoxelizer.clipmap_index * g_xFrameVoxel.vxgi.resolution;
+    DTid.y += g_xVoxelizer.clipmap_index * g_xFrame.vxgi.resolution;
 
 	for (uint i = 0; i < 6 + DIFFUSE_CONE_COUNT; ++i)
 	{
 		uint3 dst = DTid;
-        dst.x += i * g_xFrameVoxel.vxgi.resolution;
+        dst.x += i * g_xFrame.vxgi.resolution;
 
 		float4 radiance_prev = 0;
 
 		if (any(g_xVoxelizer.offsetfromPrevFrame))
 		{
 			int3 coord = dst - g_xVoxelizer.offsetfromPrevFrame;
-            int aniso_face_start_x = i * g_xFrameVoxel.vxgi.resolution;
-            int aniso_face_end_x = aniso_face_start_x + g_xFrameVoxel.vxgi.resolution;
-            int clipmap_face_start_y = g_xVoxelizer.clipmap_index * g_xFrameVoxel.vxgi.resolution;
-            int clipmap_face_end_y = clipmap_face_start_y + g_xFrameVoxel.vxgi.resolution;
+            int aniso_face_start_x = i * g_xFrame.vxgi.resolution;
+            int aniso_face_end_x = aniso_face_start_x + g_xFrame.vxgi.resolution;
+            int clipmap_face_start_y = g_xVoxelizer.clipmap_index * g_xFrame.vxgi.resolution;
+            int clipmap_face_end_y = clipmap_face_start_y + g_xFrame.vxgi.resolution;
 
 			if (
 				coord.x >= aniso_face_start_x && coord.x < aniso_face_end_x &&
 				coord.y >= clipmap_face_start_y && coord.y < clipmap_face_end_y &&
-				coord.z >= 0 && coord.z < g_xFrameVoxel.vxgi.resolution
+				coord.z >= 0 && coord.z < g_xFrame.vxgi.resolution
 				)
 			{
 				radiance_prev = input_previous_radiance[coord];
