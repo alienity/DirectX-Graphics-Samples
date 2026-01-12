@@ -45,6 +45,7 @@ namespace Math
         const Matrix4& GetViewMatrix() const { return m_ViewMatrix; }
         const Matrix4& GetProjMatrix() const { return m_ProjMatrix; }
         const Matrix4& GetViewProjMatrix() const { return m_ViewProjMatrix; }
+        const Matrix4& GetPreviousViewProjMatrix() const { return m_PreviousViewProjMatrix; }
         const Matrix4& GetReprojectionMatrix() const { return m_ReprojectMatrix; }
         const Frustum& GetViewSpaceFrustum() const { return m_FrustumVS; }
         const Frustum& GetWorldSpaceFrustum() const { return m_FrustumWS; }

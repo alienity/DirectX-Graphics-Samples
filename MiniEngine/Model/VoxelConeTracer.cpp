@@ -15,6 +15,8 @@
 #include "CompiledShaders/VXGIVoxelizationVS.h"
 #include "CompiledShaders/VXGIVoxelizationGS.h"
 #include "CompiledShaders/VXGIVoxelizationPS.h"
+#include "CompiledShaders/VXGITemporalCS.h"
+#include "CompiledShaders/VXGISDFJumpfloodCS.h"
 #include "CompiledShaders/VXGIOffsetprevCS.h"
 #include "CompiledShaders/VXGIResolveDiffuseCS.h"
 #include "CompiledShaders/VXGIResolveSpecularCS.h"
@@ -25,11 +27,6 @@ using namespace Math;
 
 namespace VCT
 {
-    // 添加VXGI渲染根签名和PSO
-    RootSignature m_vxgi_resolve_RootSig;
-    ComputePSO m_vxgi_resolve_diffuse_PSO(L"VXGI: Resolve Diffuse PSO");
-    ComputePSO m_vxgi_resolve_specular_PSO(L"VXGI: Resolve Specular PSO");
-
     LPCWSTR StringToLPCWSTR(const std::string& str)
     {
         int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), NULL, 0);
@@ -246,11 +243,22 @@ namespace VCT
 
 namespace VCT
 {
-    RootSignature m_vxgi_voxel_RootSig;
-    GraphicsPSO m_vxgi_voxel_PSO(L"VXGI: Voxelization PSO");
+    RootSignature m_vxgi_voxelization_RootSig;
+    GraphicsPSO m_vxgi_voxelization_PSO(L"VXGI: Voxelization PSO");
+
+    RootSignature m_vxgi_temporal_RootSig;
+    ComputePSO m_vxgi_temporal_PSO(L"VXGI: Temporal PSO");
+
+    RootSignature m_vxgi_jumpflood_RootSig;
+    ComputePSO m_vxgi_jumpflood_PSO(L"VXGI: JumpFlood PSO");
 
     RootSignature m_vxgi_offsetprev_RootSig;
-    ComputePSO m_vxgi_offsetprev_PSO(L"VXGI: OffsetPrev");
+    ComputePSO m_vxgi_offsetprev_PSO(L"VXGI: OffsetPrev PSO");
+
+    RootSignature m_vxgi_resolve_RootSig;
+    ComputePSO m_vxgi_resolve_diffuse_PSO(L"VXGI: Resolve Diffuse PSO");
+    ComputePSO m_vxgi_resolve_specular_PSO(L"VXGI: Resolve Specular PSO");
+
 
     void Startup(Camera& camera, ModelH3D& model)
     {
@@ -288,21 +296,99 @@ namespace VCT
         SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
         //CubeMapSamplerDesc.MaxLOD = 6.0f;
 
-        m_vxgi_voxel_RootSig.Reset(10, 3);
-        m_vxgi_voxel_RootSig[0].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL, 1);
-        m_vxgi_voxel_RootSig[1].InitAsConstantBuffer(3, D3D12_SHADER_VISIBILITY_ALL, 1);
-        m_vxgi_voxel_RootSig[2].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
-        m_vxgi_voxel_RootSig[3].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_vxgi_voxel_RootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_vxgi_voxel_RootSig[5].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_vxgi_voxel_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_vxgi_voxel_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_vxgi_voxel_RootSig[8].InitAsConstantBuffer(1);
-        m_vxgi_voxel_RootSig[9].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
-        m_vxgi_voxel_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_vxgi_voxel_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_vxgi_voxel_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-        m_vxgi_voxel_RootSig.Finalize(L"VoxelRootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+        m_vxgi_voxelization_RootSig.Reset(11, 10); // 11个根参数，10个静态采样器
+        
+        // 根常量: 12个32位常量，寄存器b999
+        m_vxgi_voxelization_RootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // CBV: b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_voxelization_RootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+        
+        // CBV: b1, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_voxelization_RootSig[2].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+        
+        // CBV: b0, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_voxelization_RootSig[3].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // CBV: b1, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_voxelization_RootSig[4].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // CBV: b2, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_voxelization_RootSig[5].InitAsConstantBuffer(2, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // 描述符表: CBV(b3, space = 1, numDescriptors = 10)
+        m_vxgi_voxelization_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 3, 10, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // 描述符表: SRV(t0, numDescriptors = 20)
+        m_vxgi_voxelization_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // 描述符表: UAV(u0, numDescriptors = 10)
+        m_vxgi_voxelization_RootSig[8].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // 静态采样器
+        m_vxgi_voxelization_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxelization_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_voxelization_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        
+        // 其他静态采样器
+        SamplerDesc linearClampSamplerDesc = {};
+        linearClampSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(100, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(101, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(102, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        linearClampSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(103, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(104, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(105, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        linearClampSamplerDesc.Filter = D3D12_FILTER_ANISOTROPIC;
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.MaxAnisotropy = 16;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(106, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(107, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(108, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        linearClampSamplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        linearClampSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+        m_vxgi_voxelization_RootSig.InitStaticSampler(109, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        m_vxgi_voxelization_RootSig.Finalize(L"VoxelRootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
         D3D12_RASTERIZER_DESC VoxelizationRasterizer;
         VoxelizationRasterizer.FillMode = D3D12_FILL_MODE_SOLID;
@@ -328,17 +414,17 @@ namespace VCT
         VoxelizationBlendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_MAX;
         VoxelizationBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
-        m_vxgi_voxel_PSO.SetRootSignature(m_vxgi_voxel_RootSig);
-        m_vxgi_voxel_PSO.SetRasterizerState(VoxelizationRasterizer);
-        m_vxgi_voxel_PSO.SetBlendState(VoxelizationBlendDesc);
-        m_vxgi_voxel_PSO.SetDepthStencilState(DepthStateDisabled);
-        m_vxgi_voxel_PSO.SetInputLayout(_countof(vertElem), vertElem);
-        m_vxgi_voxel_PSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
-        m_vxgi_voxel_PSO.SetRenderTargetFormats(0, nullptr, DepthFormat);
-        m_vxgi_voxel_PSO.SetVertexShader(g_pVXGIVoxelizationVS, sizeof(g_pVXGIVoxelizationVS));
-        m_vxgi_voxel_PSO.SetGeometryShader(g_pVXGIVoxelizationGS, sizeof(g_pVXGIVoxelizationGS));
-        m_vxgi_voxel_PSO.SetPixelShader(g_pVXGIVoxelizationPS, sizeof(g_pVXGIVoxelizationPS));
-        m_vxgi_voxel_PSO.Finalize();
+        m_vxgi_voxelization_PSO.SetRootSignature(m_vxgi_voxelization_RootSig);
+        m_vxgi_voxelization_PSO.SetRasterizerState(VoxelizationRasterizer);
+        m_vxgi_voxelization_PSO.SetBlendState(VoxelizationBlendDesc);
+        m_vxgi_voxelization_PSO.SetDepthStencilState(DepthStateDisabled);
+        m_vxgi_voxelization_PSO.SetInputLayout(_countof(vertElem), vertElem);
+        m_vxgi_voxelization_PSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
+        m_vxgi_voxelization_PSO.SetRenderTargetFormats(0, nullptr, DepthFormat);
+        m_vxgi_voxelization_PSO.SetVertexShader(g_pVXGIVoxelizationVS, sizeof(g_pVXGIVoxelizationVS));
+        m_vxgi_voxelization_PSO.SetGeometryShader(g_pVXGIVoxelizationGS, sizeof(g_pVXGIVoxelizationGS));
+        m_vxgi_voxelization_PSO.SetPixelShader(g_pVXGIVoxelizationPS, sizeof(g_pVXGIVoxelizationPS));
+        m_vxgi_voxelization_PSO.Finalize();
 
 
         m_vxgi_offsetprev_RootSig.Reset(4, 3);
@@ -355,11 +441,119 @@ namespace VCT
         m_vxgi_offsetprev_PSO.SetComputeShader(g_pVXGIOffsetprevCS, sizeof(g_pVXGIOffsetprevCS));
         m_vxgi_offsetprev_PSO.Finalize();
 
-        // 初始化VXGI解析阶段的根签名和PSO
-        // 对应VXGIRenderer.hlsli中的Voxel_RootSig
-        m_vxgi_resolve_RootSig.Reset(13, 10); // 13个根参数，10个静态采样器
+        // 初始化VXGI临时累积阶段的根签名和PSO
+        // 对应VXGITemporalCS.hlsl中的Temporal_RootSig
+        m_vxgi_temporal_RootSig.Reset(11, 10); // 11个根参数，10个静态采样器
         
-        // 根常量: 12个32位常量，寄存器b999，空间0
+        // 根常量: 12个32位常量，寄存器b999
+        m_vxgi_temporal_RootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // CBV: b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_temporal_RootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+        
+        // CBV: b1, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_temporal_RootSig[2].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+        
+        // CBV: b0, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_temporal_RootSig[3].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // CBV: b1, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_temporal_RootSig[4].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // CBV: b2, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_temporal_RootSig[5].InitAsConstantBuffer(2, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // 描述符表: CBV(b3, space = 1, numDescriptors = 10)
+        m_vxgi_temporal_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 3, 10, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // 描述符表: SRV(t0, numDescriptors = 20)
+        m_vxgi_temporal_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // 描述符表: UAV(u0, numDescriptors = 10)
+        m_vxgi_temporal_RootSig[8].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // 静态采样器
+        m_vxgi_temporal_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        
+        // 其他静态采样器
+        m_vxgi_temporal_RootSig.InitStaticSampler(100, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(101, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(102, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(103, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(104, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(105, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(106, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(107, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(108, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_temporal_RootSig.InitStaticSampler(109, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        m_vxgi_temporal_RootSig.Finalize(L"VXGITemporalRootSig", D3D12_ROOT_SIGNATURE_FLAG_NONE);
+        
+        m_vxgi_temporal_PSO.SetRootSignature(m_vxgi_temporal_RootSig);
+        m_vxgi_temporal_PSO.SetComputeShader(g_pVXGITemporalCS, sizeof(g_pVXGITemporalCS));
+        m_vxgi_temporal_PSO.Finalize();
+
+        // 初始化VXGI SDF跳转洪水填充阶段的根签名和PSO
+        // 对应VXGISDFJumpfloodCS.hlsl中的JumpFlood_RootSig
+        m_vxgi_jumpflood_RootSig.Reset(11, 10); // 11个根参数，10个静态采样器
+        
+        // 根常量: 12个32位常量，寄存器b999
+        m_vxgi_jumpflood_RootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // CBV: b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_jumpflood_RootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+        
+        // CBV: b1, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_jumpflood_RootSig[2].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+        
+        // CBV: b0, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_jumpflood_RootSig[3].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // CBV: b1, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_jumpflood_RootSig[4].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // CBV: b2, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_jumpflood_RootSig[5].InitAsConstantBuffer(2, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // 描述符表: CBV(b3, space = 1, numDescriptors = 10)
+        m_vxgi_jumpflood_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 3, 10, D3D12_SHADER_VISIBILITY_ALL, 1);
+        
+        // 描述符表: SRV(t0, numDescriptors = 20)
+        m_vxgi_jumpflood_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // 描述符表: UAV(u0, numDescriptors = 10)
+        m_vxgi_jumpflood_RootSig[8].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0);
+        
+        // 静态采样器
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        
+        // 其他静态采样器
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(100, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(101, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(102, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(103, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(104, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(105, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(106, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(107, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(108, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(109, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        
+        m_vxgi_jumpflood_RootSig.Finalize(L"VXGIJumpFloodRootSig", D3D12_ROOT_SIGNATURE_FLAG_NONE);
+        
+        m_vxgi_jumpflood_PSO.SetRootSignature(m_vxgi_jumpflood_RootSig);
+        m_vxgi_jumpflood_PSO.SetComputeShader(g_pVXGISDFJumpfloodCS, sizeof(g_pVXGISDFJumpfloodCS));
+        m_vxgi_jumpflood_PSO.Finalize();
+
+        // 初始化VXGI解析阶段的根签名和PSO
+        // 对应VXGIResolveDiffuseCS.hlsl和VXGIResolveSpecularCS.hlsl中的Resolve_RootSig
+        m_vxgi_resolve_RootSig.Reset(11, 10); // 11个根参数，10个静态采样器
+        
+        // 根常量: 12个32位常量，寄存器b999
         m_vxgi_resolve_RootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0);
         
         // CBV: b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL
@@ -377,88 +571,30 @@ namespace VCT
         // CBV: b2, space = 1, visibility = SHADER_VISIBILITY_ALL
         m_vxgi_resolve_RootSig[5].InitAsConstantBuffer(2, D3D12_SHADER_VISIBILITY_ALL, 1);
         
-        // 描述符表: 包含CBV, SRV, UAV
-        // CBV(b3, space = 1, numDescriptors = 11)
-        m_vxgi_resolve_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 3, 11, D3D12_SHADER_VISIBILITY_ALL, 1);
+        // 描述符表: CBV(b3, space = 1, numDescriptors = 10)
+        m_vxgi_resolve_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 3, 10, D3D12_SHADER_VISIBILITY_ALL, 1);
         
-        // SRV(t0, space = 0, numDescriptors = 16)
-        m_vxgi_resolve_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 16, D3D12_SHADER_VISIBILITY_ALL, 0);
+        // SRV(t0, numDescriptors = 20)
+        m_vxgi_resolve_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_ALL, 0);
         
-        // UAV(u0, space = 0, numDescriptors = 16)
-        m_vxgi_resolve_RootSig[8].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 16, D3D12_SHADER_VISIBILITY_ALL, 0);
+        // UAV(u0, numDescriptors = 10)
+        m_vxgi_resolve_RootSig[8].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0);
         
-        // 添加额外的根参数以匹配Voxel_RootSig的完整定义
-        m_vxgi_resolve_RootSig[9].InitAsConstantBuffer(3, D3D12_SHADER_VISIBILITY_ALL, 1);
-        m_vxgi_resolve_RootSig[10].InitAsConstantBuffer(4, D3D12_SHADER_VISIBILITY_ALL, 1);
-        m_vxgi_resolve_RootSig[11].InitAsConstantBuffer(5, D3D12_SHADER_VISIBILITY_ALL, 1);
-        m_vxgi_resolve_RootSig[12].InitAsConstantBuffer(6, D3D12_SHADER_VISIBILITY_ALL, 1);
-        
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+        m_vxgi_jumpflood_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+
         // 静态采样器
-        SamplerDesc linearClampSamplerDesc = {};
-        linearClampSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         m_vxgi_resolve_RootSig.InitStaticSampler(100, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
-        SamplerDesc linearWrapSamplerDesc = linearClampSamplerDesc;
-        linearWrapSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        linearWrapSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        linearWrapSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        m_vxgi_resolve_RootSig.InitStaticSampler(101, linearWrapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
-        SamplerDesc linearMirrorSamplerDesc = linearClampSamplerDesc;
-        linearMirrorSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        linearMirrorSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        linearMirrorSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        m_vxgi_resolve_RootSig.InitStaticSampler(102, linearMirrorSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
-        SamplerDesc pointClampSamplerDesc = {};
-        pointClampSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-        pointClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        pointClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        pointClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        m_vxgi_resolve_RootSig.InitStaticSampler(103, pointClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
-        SamplerDesc pointWrapSamplerDesc = pointClampSamplerDesc;
-        pointWrapSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        pointWrapSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        pointWrapSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        m_vxgi_resolve_RootSig.InitStaticSampler(104, pointWrapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
-        SamplerDesc pointMirrorSamplerDesc = pointClampSamplerDesc;
-        pointMirrorSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        pointMirrorSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        pointMirrorSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        m_vxgi_resolve_RootSig.InitStaticSampler(105, pointMirrorSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
-        SamplerDesc anisoClampSamplerDesc = {};
-        anisoClampSamplerDesc.Filter = D3D12_FILTER_ANISOTROPIC;
-        anisoClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        anisoClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        anisoClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        anisoClampSamplerDesc.MaxAnisotropy = 16;
-        m_vxgi_resolve_RootSig.InitStaticSampler(106, anisoClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
-        SamplerDesc anisoWrapSamplerDesc = anisoClampSamplerDesc;
-        anisoWrapSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        anisoWrapSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        anisoWrapSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        m_vxgi_resolve_RootSig.InitStaticSampler(107, anisoWrapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
-        SamplerDesc anisoMirrorSamplerDesc = anisoClampSamplerDesc;
-        anisoMirrorSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        anisoMirrorSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        anisoMirrorSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        m_vxgi_resolve_RootSig.InitStaticSampler(108, anisoMirrorSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
-        SamplerDesc comparisonSamplerDesc = {};
-        comparisonSamplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
-        comparisonSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        comparisonSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        comparisonSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        comparisonSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
-        m_vxgi_resolve_RootSig.InitStaticSampler(109, comparisonSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_resolve_RootSig.InitStaticSampler(101, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_resolve_RootSig.InitStaticSampler(102, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_resolve_RootSig.InitStaticSampler(103, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_resolve_RootSig.InitStaticSampler(104, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_resolve_RootSig.InitStaticSampler(105, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_resolve_RootSig.InitStaticSampler(106, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_resolve_RootSig.InitStaticSampler(107, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_resolve_RootSig.InitStaticSampler(108, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+        m_vxgi_resolve_RootSig.InitStaticSampler(109, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
         
         m_vxgi_resolve_RootSig.Finalize(L"VXGIResolveRootSig", D3D12_ROOT_SIGNATURE_FLAG_NONE);
         
@@ -636,6 +772,129 @@ namespace VCT
         res.pre_clear = true;
     }
 
+    void RefreshEnvProbes(CommandContext& BaseContext, const Math::Camera& camera)
+    {
+        CameraCB cb;
+        cb.init();
+
+        {
+            const float zNearP = camera.GetNearClip();
+            const float zFarP = camera.GetFarClip();
+            const float zNearPRcp = 1.0f / zNearP;
+            const float zFarPRcp = 1.0f / zFarP;
+
+            XMMATRIX viewProjection = camera.GetViewProjMatrix();
+            XMStoreFloat4x4(&cb.cameras[0].view_projection, viewProjection);
+
+            XMMATRIX invVP = XMMatrixInverse(nullptr, viewProjection);
+
+            XMStoreFloat4x4(&cb.cameras[0].inverse_view_projection, invVP);
+
+            // 添加缺失的视图矩阵和投影矩阵
+            XMMATRIX view = camera.GetViewMatrix();
+            XMMATRIX proj = camera.GetProjMatrix();
+            XMStoreFloat4x4(&cb.cameras[0].view, view);
+            XMStoreFloat4x4(&cb.cameras[0].projection, proj);
+
+            // 添加缺失的逆矩阵
+            XMMATRIX invView = XMMatrixInverse(nullptr, view);
+            XMMATRIX invProj = XMMatrixInverse(nullptr, proj);
+            XMStoreFloat4x4(&cb.cameras[0].inverse_view, invView);
+            XMStoreFloat4x4(&cb.cameras[0].inverse_projection, invProj);
+
+            // 添加缺失的forward和up向量
+            XMVECTOR forward = camera.GetForwardVec();
+            XMVECTOR up = camera.GetUpVec();
+            XMStoreFloat3(&cb.cameras[0].forward, forward);
+            XMStoreFloat3(&cb.cameras[0].up, up);
+
+            // 添加缺失的clip_plane和reflection_plane
+            cb.cameras[0].clip_plane = float4(0, 0, 0, 0); // 默认值
+            cb.cameras[0].reflection_plane = float4(0, 0, 0, 0); // 默认值
+
+            // 添加缺失的temporal aa数据
+            cb.cameras[0].temporalaa_jitter = float2(0, 0);
+            cb.cameras[0].temporalaa_jitter_prev = float2(0, 0);
+
+            // 添加缺失的previous matrices (使用实际的上一帧矩阵)
+            XMMATRIX prevViewProj = camera.GetPreviousViewProjMatrix();
+            XMStoreFloat4x4(&cb.cameras[0].previous_view_projection, prevViewProj);
+
+            // 从上一帧视图投影矩阵计算上一帧的各个矩阵
+            // 注意：这里使用当前矩阵作为近似值，因为没有单独的获取上一帧view和proj矩阵的函数
+            XMStoreFloat4x4(&cb.cameras[0].previous_view, camera.GetViewMatrix()); // 使用当前视图矩阵作为近似值
+            XMStoreFloat4x4(&cb.cameras[0].previous_projection, camera.GetProjMatrix()); // 使用当前投影矩阵作为近似值
+            XMStoreFloat4x4(&cb.cameras[0].previous_inverse_view_projection, XMMatrixInverse(nullptr, prevViewProj));
+
+            // 添加缺失的reflection matrices (使用当前矩阵作为初始值)
+            XMStoreFloat4x4(&cb.cameras[0].reflection_view_projection, viewProjection);
+            XMStoreFloat4x4(&cb.cameras[0].reflection_inverse_view_projection, invVP);
+
+            // 添加缺失的reprojection矩阵
+            XMMATRIX reprojection = prevViewProj * XMMatrixInverse(nullptr, viewProjection);
+            XMStoreFloat4x4(&cb.cameras[0].reprojection, reprojection);
+
+            // 添加缺失的光圈参数（使用默认值）
+            cb.cameras[0].aperture_shape = float2(1, 1);
+            cb.cameras[0].aperture_size = 0.0f;
+            cb.cameras[0].focal_length = 1.0f;
+
+            // 添加缺失的canvas大小（使用与内部分辨率相同）
+            cb.cameras[0].canvas_size = float2((float)g_SceneColorBuffer.GetWidth(), (float)g_SceneColorBuffer.GetHeight());
+            cb.cameras[0].canvas_size_rcp.x = 1.0f / std::max(0.0001f, cb.cameras[0].canvas_size.x);
+            cb.cameras[0].canvas_size_rcp.y = 1.0f / std::max(0.0001f, cb.cameras[0].canvas_size.y);
+
+            // 添加缺失的scissor参数
+            cb.cameras[0].scissor = uint4(0, 0, (uint32_t)g_SceneColorBuffer.GetWidth(), (uint32_t)g_SceneColorBuffer.GetHeight());
+            cb.cameras[0].scissor_uv = float4(0.0f, 0.0f, 1.0f, 1.0f);
+
+            XMVECTOR pos = camera.GetPosition();
+            XMStoreFloat3(&cb.cameras[0].position, pos);
+
+            cb.cameras[0].output_index = 0;
+
+            cb.cameras[0].z_near = zNearP;
+
+            cb.cameras[0].z_near_rcp = zNearPRcp;
+
+            cb.cameras[0].z_far = zFarP;
+
+            cb.cameras[0].z_far_rcp = zFarPRcp;
+
+            cb.cameras[0].z_range = abs(zFarP - zNearP);
+
+            cb.cameras[0].z_range_rcp = 1.0f / std::max(0.0001f, cb.cameras[0].z_range);
+
+            // 获取实际的渲染目标分辨率而不是硬编码
+            cb.cameras[0].internal_resolution = uint2((uint32_t)g_SceneColorBuffer.GetWidth(), (uint32_t)g_SceneColorBuffer.GetHeight());
+
+            cb.cameras[0].internal_resolution_rcp.x = 1.0f / cb.cameras[0].internal_resolution.x;
+
+            cb.cameras[0].internal_resolution_rcp.y = 1.0f / cb.cameras[0].internal_resolution.y;
+
+            // 在MiniEngine的右手坐标系中，Z轴指向屏幕内侧（负方向）
+            // 对于透视投影，近平面的齐次坐标w分量是正数，远平面的w分量也是正数
+            // 由于使用了ReverseZ优化（如Camera.cpp中注释所述），近平面在Z=1，远平面在Z=0
+            // 因此，视锥体近平面的齐声坐标为(-1, 1, 1, 1), (1, 1, 1, 1), (-1, -1, 1, 1), (1, -1, 1, 1)
+            // 视锥体远平面的齐声坐标为(-1, 1, 0, 1), (1, 1, 0, 1), (-1, -1, 0, 1), (1, -1, 0, 1)
+            XMStoreFloat4(&cb.cameras[0].frustum_corners.cornersNEAR[0], XMVector3TransformCoord(XMVectorSet(-1, 1, 1, 1), invVP));
+
+            XMStoreFloat4(&cb.cameras[0].frustum_corners.cornersNEAR[1], XMVector3TransformCoord(XMVectorSet(1, 1, 1, 1), invVP));
+
+            XMStoreFloat4(&cb.cameras[0].frustum_corners.cornersNEAR[2], XMVector3TransformCoord(XMVectorSet(-1, -1, 1, 1), invVP));
+
+            XMStoreFloat4(&cb.cameras[0].frustum_corners.cornersNEAR[3], XMVector3TransformCoord(XMVectorSet(1, -1, 1, 1), invVP));
+
+            XMStoreFloat4(&cb.cameras[0].frustum_corners.cornersFAR[0], XMVector3TransformCoord(XMVectorSet(-1, 1, 0, 1), invVP));
+
+            XMStoreFloat4(&cb.cameras[0].frustum_corners.cornersFAR[1], XMVector3TransformCoord(XMVectorSet(1, 1, 0, 1), invVP));
+
+            XMStoreFloat4(&cb.cameras[0].frustum_corners.cornersFAR[2], XMVector3TransformCoord(XMVectorSet(-1, -1, 0, 1), invVP));
+
+            XMStoreFloat4(&cb.cameras[0].frustum_corners.cornersFAR[3], XMVector3TransformCoord(XMVectorSet(1, -1, 0, 1), invVP));
+        }
+    }
+    
     void VXGI_Voxelize(CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
         ModelH3D& model, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
     {

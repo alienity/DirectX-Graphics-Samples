@@ -58,6 +58,9 @@
     <Filter Include="Shaders">
       <UniqueIdentifier>{9169b7c9-f1a7-41d4-9098-58de36da850c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shaders\VoxelConeTracing">
+      <UniqueIdentifier>{59a61393-9495-41f1-ac62-94bd7b9efbb4}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="SponzaRenderer.h">
@@ -109,32 +112,32 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="VoxelConeTracing\Voxelization.h" />
-    <ClInclude Include="Shaders\VXGI\VXGICommon.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Shaders\VXGI\VXGIRenderer.hlsli">
-      <Filter>Shaders</Filter>
-    </ClInclude>
     <ClInclude Include="Shaders\VXGI\VoxelConeTracing.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </ClInclude>
     <ClInclude Include="Shaders\VXGI\VXGIColorSpaceUtility.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
+    </ClInclude>
+    <ClInclude Include="Shaders\VXGI\VXGICommon.hlsli">
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </ClInclude>
     <ClInclude Include="Shaders\VXGI\VXGIGlobal.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </ClInclude>
     <ClInclude Include="Shaders\VXGI\VXGIPixelPacking_R11G11B10.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </ClInclude>
     <ClInclude Include="Shaders\VXGI\VXGIPixelPacking_RGBE.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </ClInclude>
     <ClInclude Include="Shaders\VXGI\VXGIPostprocess.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
+    </ClInclude>
+    <ClInclude Include="Shaders\VXGI\VXGIRenderer.hlsli">
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </ClInclude>
     <ClInclude Include="Shaders\VXGI\VXGISH_Lite.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -235,28 +238,28 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\VXGI\VXGIVoxelizationVS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="Shaders\VXGI\VXGIVoxelizationGS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="Shaders\VXGI\VXGIVoxelizationPS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\VXGI\VXGIOffsetprevCS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="Shaders\VXGI\VXGITemporalCS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="Shaders\VXGI\VXGISDFJumpfloodCS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\VXGI\VXGIResolveDiffuseCS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\VXGI\VXGIResolveSpecularCS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Shaders\VoxelConeTracing</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\VXGI\VXGISDFJumpfloodCS.hlsl">
+      <Filter>Shaders\VoxelConeTracing</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\VXGI\VXGITemporalCS.hlsl">
+      <Filter>Shaders\VoxelConeTracing</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\VXGI\VXGIVoxelizationGS.hlsl">
+      <Filter>Shaders\VoxelConeTracing</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\VXGI\VXGIVoxelizationPS.hlsl">
+      <Filter>Shaders\VoxelConeTracing</Filter>
     </FxCompile>
   </ItemGroup>
 </Project>
