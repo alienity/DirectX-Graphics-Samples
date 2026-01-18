@@ -39,7 +39,7 @@ RWTexture3D<float> output_sdf : register(u1);
 
 static const float blend_speed = 0.5;
 
-[RootSignature(Temporal_RootSig)]
+[RootSignature(Voxel_RootSig)]
 [numthreads(8, 8, 8)]
 void main(uint3 DTid : SV_DispatchThreadID)
 {

@@ -3,8 +3,8 @@
 #include "../Core/pch.h"
 #include "../Core/GpuResource.h"
 #include "../Core/VectorMath.h"
+#include "VolumeBuffer.h"
 #include "Model.h"
-#include <vector>
 
 class ColorBuffer;
 class BoolVar;
@@ -41,17 +41,6 @@ using int4 = XMINT4;
 
 namespace VCT
 {
-    class VolumeBuffer : public ColorBuffer
-    {
-    public:
-        void Create(const std::wstring& Name, uint32_t Width, uint32_t Height, uint32_t Depth, uint32_t NumMips,
-            DXGI_FORMAT Format, D3D12_GPU_VIRTUAL_ADDRESS VidMemPtr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN);
-    protected:
-        void CreateDerived3DViews(ID3D12Device* Device, DXGI_FORMAT Format, uint32_t DpethOrArraySize, uint32_t NumMips = 1);
-    private:
-        D3D12_RESOURCE_DESC DescribeTex3D(uint32_t Width, uint32_t Height, uint32_t DpethOrArraySize, uint32_t NumMips, DXGI_FORMAT Format, UINT Flags);
-    };
-
     class OrthoVoxelCamera : public Math::BaseCamera
     {
     public:

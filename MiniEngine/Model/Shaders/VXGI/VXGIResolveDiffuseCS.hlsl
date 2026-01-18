@@ -43,7 +43,7 @@ Texture3D<float> texture_sdf : register(t16);
 
 RWTexture2D<float4> output : register(u0);
 
-[RootSignature(Resolve_RootSig)]
+[RootSignature(Voxel_RootSig)]
 [numthreads(8, 8, 1)]
 void main(uint3 DTid : SV_DispatchThreadID)
 {

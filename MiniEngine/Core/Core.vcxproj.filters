@@ -451,6 +451,30 @@
     <FxCompile Include="Shaders\PresentSDRPS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\GenerateMips3DLinearCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddXCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddXYCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddXZCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddYCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddYZCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddZCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BitonicSort.cpp" />
@@ -508,6 +532,7 @@
     <ClCompile Include="UploadBuffer.cpp" />
     <ClCompile Include="Utility.cpp" />
     <ClCompile Include="Util\CommandLineArg.cpp" />
+    <ClCompile Include="VolumeBuffer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BitonicSort.h" />
@@ -581,6 +606,7 @@
     <ClInclude Include="Utility.h" />
     <ClInclude Include="Util\CommandLineArg.h" />
     <ClInclude Include="VectorMath.h" />
+    <ClInclude Include="VolumeBuffer.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Math\Functions.inl" />
@@ -666,6 +692,15 @@
       <Filter>Shaders</Filter>
     </None>
     <None Include="Shaders\PresentRS.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\GenerateMips3DCS.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\PixelPacking_Velocity.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\ToneMappingUtility.hlsli">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>

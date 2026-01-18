@@ -131,6 +131,7 @@
     <ClInclude Include="Utility.h" />
     <ClInclude Include="Util\CommandLineArg.h" />
     <ClInclude Include="VectorMath.h" />
+    <ClInclude Include="VolumeBuffer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BitonicSort.cpp" />
@@ -190,6 +191,7 @@
     <ClCompile Include="UploadBuffer.cpp" />
     <ClCompile Include="Utility.cpp" />
     <ClCompile Include="Util\CommandLineArg.cpp" />
+    <ClCompile Include="VolumeBuffer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\AdaptExposureCS.hlsl" />
@@ -295,6 +297,14 @@
     <FxCompile Include="Shaders\GenerateHistogramCS.hlsl" />
     <FxCompile Include="Shaders\FXAAPass2HCS.hlsl" />
     <FxCompile Include="Shaders\FXAAPass2VCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMips3DLinearCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddXCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddXYCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddXZCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddYCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddYZCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMips3DLinearOddZCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsGammaCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsGammaOddCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsGammaOddXCS.hlsl" />
@@ -414,6 +424,7 @@
     <None Include="Shaders\FXAAPass1CS.hlsli" />
     <None Include="Shaders\FXAAPass2CS.hlsli" />
     <None Include="Shaders\FXAARootSignature.hlsli" />
+    <None Include="Shaders\GenerateMips3DCS.hlsli" />
     <None Include="Shaders\GenerateMipsCS.hlsli" />
     <None Include="Shaders\LanczosFunctions.hlsli" />
     <None Include="Shaders\MotionBlurRS.hlsli" />
@@ -424,6 +435,7 @@
     <None Include="Shaders\PixelPacking_R11G11B10.hlsli" />
     <None Include="Shaders\PixelPacking_RGBE.hlsli" />
     <None Include="Shaders\PixelPacking_RGBM.hlsli" />
+    <None Include="Shaders\PixelPacking_Velocity.hlsli" />
     <None Include="Shaders\PostEffectsRS.hlsli" />
     <None Include="Shaders\PresentRS.hlsli" />
     <None Include="Shaders\ShaderUtility.hlsli" />
@@ -433,6 +445,7 @@
     <None Include="Shaders\PixelPacking.hlsli" />
     <None Include="Shaders\SSAORS.hlsli" />
     <None Include="Shaders\TextRS.hlsli" />
+    <None Include="Shaders\ToneMappingUtility.hlsli" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemDefinitionGroup>

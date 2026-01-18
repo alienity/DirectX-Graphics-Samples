@@ -37,7 +37,7 @@ struct Push
 //PUSHCONSTANT(push, Push);
 ConstantBuffer<Push> push : register(b999);
 
-[RootSignature(JumpFlood_RootSig)]
+[RootSignature(Voxel_RootSig)]
 [numthreads(8, 8, 8)]
 void main(uint3 DTid : SV_DispatchThreadID)
 {

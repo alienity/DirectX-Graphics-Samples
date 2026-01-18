@@ -21,6 +21,7 @@
 #include "GpuBuffer.h"
 #include "Texture.h"
 #include "PixelBuffer.h"
+#include "VolumeBuffer.h"
 #include "DynamicDescriptorHeap.h"
 #include "LinearAllocator.h"
 #include "CommandSignature.h"
@@ -202,6 +203,7 @@ public:
 
     void ClearUAV( GpuBuffer& Target );
     void ClearUAV( ColorBuffer& Target );
+    void ClearUAV( VolumeBuffer& Target );
     void ClearColor( ColorBuffer& Target, D3D12_RECT* Rect = nullptr);
     void ClearColor(ColorBuffer& Target, float Colour[4], D3D12_RECT* Rect = nullptr);
     void ClearDepth( DepthBuffer& Target );
