@@ -475,6 +475,9 @@
     <FxCompile Include="Shaders\GenerateMips3DLinearOddZCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\GenerateMips3DCS.hlsli">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BitonicSort.cpp" />
@@ -692,9 +695,6 @@
       <Filter>Shaders</Filter>
     </None>
     <None Include="Shaders\PresentRS.hlsli">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="Shaders\GenerateMips3DCS.hlsli">
       <Filter>Shaders</Filter>
     </None>
     <None Include="Shaders\PixelPacking_Velocity.hlsli">

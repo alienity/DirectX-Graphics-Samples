@@ -12,4 +12,4 @@
 //
 
 #define NON_POWER_OF_TWO 5
-#include "GenerateMipsCS.hlsli"
+#include "GenerateMips3DCS.hlsli"

@@ -128,10 +128,10 @@ void VolumeBuffer::GenerateMipMaps(CommandContext& BaseContext)
         // Determine if the first downsample is more than 2:1.  This happens whenever
         // the source width or height is odd.
         uint32_t NonPowerOfTwo = (SrcWidth & 1) | (SrcHeight & 1) << 1 | (SrcDepth & 1) << 2;
-        if (m_Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
-            Context.SetPipelineState(Graphics::g_GenerateMipsGammaPSO[NonPowerOfTwo]);
-        else
-            Context.SetPipelineState(Graphics::g_GenerateMipsLinearPSO[NonPowerOfTwo]);
+        //if (m_Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+        //    Context.SetPipelineState(Graphics::g_GenerateMipsGammaPSO[NonPowerOfTwo]);
+        //else
+            Context.SetPipelineState(Graphics::g_GenerateMips3DLinearPSO[NonPowerOfTwo]);
 
         // We can downsample up to four times, but if the ratio between levels is not
         // exactly 2:1, we have to shift our blend weights, which gets complicated or
@@ -152,10 +152,17 @@ void VolumeBuffer::GenerateMipMaps(CommandContext& BaseContext)
             DstWidth = 1;
         if (DstHeight == 0)
             DstHeight = 1;
+        if (DstDepth == 0)
+            DstDepth = 1;
 
-        Context.SetConstants(0, TopMip, NumMips, 1.0f / DstWidth, 1.0f / DstHeight);
+        Context.SetConstant(0, 0, 1.0f / DstWidth);
+        Context.SetConstant(0, 1, 1.0f / DstHeight);
+        Context.SetConstant(0, 2, 1.0f / DstDepth);
+        Context.SetConstant(0, 3, TopMip);
+        Context.SetConstant(0, 4, NumMips);
+
         Context.SetDynamicDescriptors(2, 0, NumMips, m_UAVHandle + TopMip + 1);
-        Context.Dispatch2D(DstWidth, DstHeight);
+        Context.Dispatch3D(DstWidth, DstHeight, DstDepth, 8, 8, 8);
 
         Context.InsertUAVBarrier(*this);
 

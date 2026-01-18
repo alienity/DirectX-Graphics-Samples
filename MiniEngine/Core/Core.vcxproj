@@ -424,7 +424,9 @@
     <None Include="Shaders\FXAAPass1CS.hlsli" />
     <None Include="Shaders\FXAAPass2CS.hlsli" />
     <None Include="Shaders\FXAARootSignature.hlsli" />
-    <None Include="Shaders\GenerateMips3DCS.hlsli" />
+    <FxCompile Include="Shaders\GenerateMips3DCS.hlsli">
+      <FileType>Document</FileType>
+    </FxCompile>
     <None Include="Shaders\GenerateMipsCS.hlsli" />
     <None Include="Shaders\LanczosFunctions.hlsli" />
     <None Include="Shaders\MotionBlurRS.hlsli" />
