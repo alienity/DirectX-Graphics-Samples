@@ -87,24 +87,6 @@ namespace VCT
         //int padding1;
 
         VoxelClipMap clipmaps[VXGI_CLIPMAP_COUNT];
-
-#ifndef __cplusplus
-        float3 world_to_clipmap(in float3 P, in VoxelClipMap clipmap)
-        {
-            float3 diff = (P - clipmap.center) * resolution_rcp / clipmap.voxelSize;
-            float3 uvw = diff * float3(0.5f, -0.5f, 0.5f) + 0.5f;
-            return uvw;
-        }
-        float3 clipmap_to_world(in float3 uvw, in VoxelClipMap clipmap)
-        {
-            float3 P = uvw * 2 - 1;
-            P.y *= -1;
-            P *= clipmap.voxelSize;
-            P *= resolution;
-            P += clipmap.center;
-            return P;
-        }
-#endif // __cplusplus
     };
 
     struct alignas(16) VoxelizerCB
@@ -337,7 +319,7 @@ namespace VCT
     };
 }
 
-namespace VCT::Primitive
+namespace VCT
 {
     struct Sphere;
     struct Ray;
@@ -667,10 +649,10 @@ namespace VCT
 
 namespace VCT
 {
-    extern bool VXGI_ENABLED;              // VXGI����״̬
-    extern bool VXGI_REFLECTIONS_ENABLED;  // VXGI��������״̬
-    extern bool VXGI_DEBUG;                // VXGI����ģʽ
-    extern int VXGI_DEBUG_CLIPMAP;         // VXGI����������ͼ����
+    extern bool VXGI_ENABLED;
+    extern bool VXGI_REFLECTIONS_ENABLED;
+    extern bool VXGI_DEBUG;
+    extern int VXGI_DEBUG_CLIPMAP;
 
     // VXGI: Voxel-based Global Illumination (voxel cone tracing-based)
     struct VXGIResources
@@ -682,8 +664,6 @@ namespace VCT
         bool IsValid() const { return diffuse.GetResource() != nullptr; }
     };
 
-    void CreateVXGIResources(VXGIResources& res, XMUINT2 resolution);
-
     void RefreshEnvProbes(CommandContext& BaseContext, const Math::Camera& camera);
     
     void VXGI_Voxelize(CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
@@ -694,5 +674,5 @@ namespace VCT
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
 
     void Startup(Math::Camera& camera, ModelH3D& model);
-    void Cleanup(void);
+    void Shutdown(void);
 } // namespace VCT

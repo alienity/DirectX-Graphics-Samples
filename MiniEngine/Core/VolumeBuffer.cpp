@@ -6,6 +6,36 @@
 
 using namespace Graphics;
 
+void VolumeBuffer::CreateTextureResource(ID3D12Device* Device, const std::wstring& Name,
+    const D3D12_RESOURCE_DESC& ResourceDesc, D3D12_GPU_VIRTUAL_ADDRESS VidMemPtr)
+{
+    Destroy();
+
+    (void)VidMemPtr;
+
+    {
+        CD3DX12_HEAP_PROPERTIES HeapProps(D3D12_HEAP_TYPE_DEFAULT);
+        ASSERT_SUCCEEDED(Device->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE,
+            &ResourceDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, MY_IID_PPV_ARGS(&m_pResource)));
+    }
+
+    m_UsageState = D3D12_RESOURCE_STATE_COMMON;
+    m_GpuVirtualAddress = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
+
+#ifndef RELEASE
+    m_pResource->SetName(Name.c_str());
+#else
+    (Name);
+#endif
+}
+
+void VolumeBuffer::CreateTextureResource(ID3D12Device* Device, const std::wstring& Name,
+    const D3D12_RESOURCE_DESC& ResourceDesc, EsramAllocator& Allocator)
+{
+    (Allocator);
+    CreateTextureResource(Device, Name, ResourceDesc);
+}
+
 void VolumeBuffer::CreateDerivedViews(ID3D12Device* Device, DXGI_FORMAT Format, uint32_t DepthSize, uint32_t NumMips)
 {
     ASSERT(DepthSize == 1 || NumMips == 1, "We don't support auto-mips on texture arrays");
@@ -87,14 +117,7 @@ void VolumeBuffer::Create(const std::wstring& Name, uint32_t Width, uint32_t Hei
     ResourceDesc.SampleDesc.Count = m_FragmentCount;
     ResourceDesc.SampleDesc.Quality = 0;
 
-    D3D12_CLEAR_VALUE ClearValue = {};
-    ClearValue.Format = Format;
-    ClearValue.Color[0] = m_ClearColor.R();
-    ClearValue.Color[1] = m_ClearColor.G();
-    ClearValue.Color[2] = m_ClearColor.B();
-    ClearValue.Color[3] = m_ClearColor.A();
-
-    CreateTextureResource(Graphics::g_Device, Name, ResourceDesc, ClearValue, VidMem);
+    CreateTextureResource(Graphics::g_Device, Name, ResourceDesc, VidMem);
     CreateDerivedViews(Graphics::g_Device, Format, Depth, NumMips);
 }
 

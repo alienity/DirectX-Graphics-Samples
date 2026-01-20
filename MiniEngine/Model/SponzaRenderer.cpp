@@ -167,7 +167,7 @@ const ModelH3D& Sponza::GetModel()
 
 void Sponza::Cleanup( void )
 {
-    VCT::Cleanup();
+    VCT::Shutdown();
 
     m_Model.Clear();
     Lighting::Shutdown();
@@ -301,7 +301,7 @@ void Sponza::RenderScene(
 
     pfnSetupGraphicsState();
     
-    VCT::Voxelize(gfxContext, camera, m_SunShadow, viewport, scissor);
+    VCT::VXGI_Voxelize(gfxContext, camera, m_SunShadow, m_Model, viewport, scissor);
 	
 	pfnSetupGraphicsState();
 

@@ -53,6 +53,12 @@ protected:
 		return Flags;
 	}
 
+	void CreateTextureResource(ID3D12Device* Device, const std::wstring& Name, const D3D12_RESOURCE_DESC& ResourceDesc,
+		D3D12_GPU_VIRTUAL_ADDRESS VidMemPtr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN);
+
+	void CreateTextureResource(ID3D12Device* Device, const std::wstring& Name, const D3D12_RESOURCE_DESC& ResourceDesc,
+		EsramAllocator& Allocator);
+
 	// Compute the number of texture levels needed to reduce to 1x1.  This uses
 	// _BitScanReverse to find the highest set bit.  Each dimension reduces by
 	// half and truncates bits.  The dimension 256 (0x100) has 9 mip levels, same

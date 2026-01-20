@@ -277,6 +277,7 @@ public:
 
     void ClearUAV( GpuBuffer& Target );
     void ClearUAV( ColorBuffer& Target );
+    void ClearUAV( VolumeBuffer& Target );
 
     void SetRootSignature( const RootSignature& RootSig );
 

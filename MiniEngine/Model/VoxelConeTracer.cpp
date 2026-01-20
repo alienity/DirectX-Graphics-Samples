@@ -87,17 +87,17 @@ namespace VCT
 
     void SceneGI::Update(const Camera& camera)
     {
-        if (vxgi.radiance.GetResource() != nullptr)
+        if (vxgi.radiance.GetResource() == nullptr)
         {
             vxgi.radiance.Create(L"vxgi.radiance", vxgi.res * (6 + DIFFUSE_CONE_COUNT), vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
             vxgi.prev_radiance.Create(L"vxgi.prev_radiance", vxgi.res * (6 + DIFFUSE_CONE_COUNT), vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
             vxgi.pre_clear = true;
         }
-        if (vxgi.render_atomic.GetResource() != nullptr)
+        if (vxgi.render_atomic.GetResource() == nullptr)
         {
             vxgi.render_atomic.Create(L"vxgi.render_atomic", vxgi.res * 6, vxgi.res, vxgi.res * VOXELIZATION_CHANNEL_COUNT, 1, DXGI_FORMAT_R32_UINT);
         }
-        if (vxgi.sdf.GetResource() != nullptr)
+        if (vxgi.sdf.GetResource() == nullptr)
         {
             vxgi.sdf.Create(L"vxgi.sdf", vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16_FLOAT);
             vxgi.sdf_temp.Create(L"vxgi.sdf_temp", vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16_FLOAT);
@@ -142,8 +142,8 @@ namespace VCT
     BoolVar Enable("Graphics/VCT/Enable", true);
     BoolVar DebugDraw("Graphics/VCT/DebugDraw", false);
 
-    SceneGI scene_gi;
-    VXGIResources vxgi_resources;
+    SceneGI g_scene_gi;
+    VXGIResources g_vxgi_resources;
 
     ByteAddressBuffer g_xFrame;
     ByteAddressBuffer g_xVoxelizer;
@@ -155,22 +155,21 @@ namespace VCT
     RootSignature m_vxgi_RootSig;
 
     GraphicsPSO m_vxgi_voxelization_PSO(L"VXGI: Voxelization PSO");
-
     ComputePSO m_vxgi_temporal_PSO(L"VXGI: Temporal PSO");
-
     ComputePSO m_vxgi_jumpflood_PSO(L"VXGI: JumpFlood PSO");
-
     ComputePSO m_vxgi_offsetprev_PSO(L"VXGI: OffsetPrev PSO");
-
     ComputePSO m_vxgi_resolve_diffuse_PSO(L"VXGI: Resolve Diffuse PSO");
     ComputePSO m_vxgi_resolve_specular_PSO(L"VXGI: Resolve Specular PSO");
 
 
     void Startup(Camera& camera, ModelH3D& model)
     {
+        uint32_t sceneWidth = g_SceneColorBuffer.GetWidth();
+        uint32_t sceneHeight = g_SceneColorBuffer.GetHeight();
+
         // DXGI_FORMAT ColorFormat = g_SceneColorBuffer.GetFormat();
         // DXGI_FORMAT NormalFormat = g_SceneNormalBuffer.GetFormat();
-        DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();
+        // DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();
 
         D3D12_INPUT_ELEMENT_DESC vertElem[] =
         {
@@ -202,7 +201,7 @@ namespace VCT
         SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
         //CubeMapSamplerDesc.MaxLOD = 6.0f;
 
-        m_vxgi_RootSig.Reset(11, 10); // 11个根参数，10个静态采样器
+        m_vxgi_RootSig.Reset(9, 13); // 9个根参数，13个静态采样器
         
         // 根常量: 12个32位常量，寄存器b999
         m_vxgi_RootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0);
@@ -326,7 +325,7 @@ namespace VCT
         m_vxgi_voxelization_PSO.SetDepthStencilState(DepthStateDisabled);
         m_vxgi_voxelization_PSO.SetInputLayout(_countof(vertElem), vertElem);
         m_vxgi_voxelization_PSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
-        m_vxgi_voxelization_PSO.SetRenderTargetFormats(0, nullptr, DepthFormat);
+        m_vxgi_voxelization_PSO.SetRenderTargetFormats(0, nullptr, DXGI_FORMAT_UNKNOWN);
         m_vxgi_voxelization_PSO.SetVertexShader(g_pVXGIVoxelizationVS, sizeof(g_pVXGIVoxelizationVS));
         m_vxgi_voxelization_PSO.SetGeometryShader(g_pVXGIVoxelizationGS, sizeof(g_pVXGIVoxelizationGS));
         m_vxgi_voxelization_PSO.SetPixelShader(g_pVXGIVoxelizationPS, sizeof(g_pVXGIVoxelizationPS));
@@ -353,6 +352,8 @@ namespace VCT
         m_vxgi_resolve_specular_PSO.SetComputeShader(g_pVXGIResolveSpecularCS, sizeof(g_pVXGIResolveSpecularCS));
         m_vxgi_resolve_specular_PSO.Finalize();
 
+        m_Model = model;
+
         // The caller of this function can override which materials are considered cutouts
         m_pMaterialIsCutout.resize(model.GetMaterialCount());
         for (uint32_t i = 0; i < m_Model.GetMaterialCount(); ++i)
@@ -370,19 +371,24 @@ namespace VCT
             }
         }
 
+        if (!g_vxgi_resources.IsValid())
+        {
+            g_vxgi_resources.diffuse.Create(L"vxgi.diffuse", sceneWidth, sceneHeight, 1, DXGI_FORMAT_R11G11B10_FLOAT);
+            g_vxgi_resources.specular.Create(L"vxgi.specular", sceneWidth, sceneHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+            g_vxgi_resources.pre_clear = true;
+        }
     }
 
-    void Cleanup(void)
+    void Shutdown(void)
     {
-        if (vxgi_resources.IsValid())
-        {
-            vxgi_resources.diffuse.Destroy();
-            vxgi_resources.specular.Destroy();
-        }
+        g_scene_gi.Destroy();
+        g_vxgi_resources.diffuse.Destroy();
+        g_vxgi_resources.specular.Destroy();
         g_xFrame.Destroy();
         g_xVoxelizer.Destroy();
     }
 
+    /*
     void VoxelizeObjects(GraphicsContext& gfxContext, const ShadowCamera& SunShadow, const Matrix4& ViewProjMat,
                          const Vector3& viewerPos, eObjectFilter Filter)
     {
@@ -435,94 +441,12 @@ namespace VCT
             g_xVoxelizer.Create(L"g_xVoxelizer", 1, sizeof(VoxelizerCB));
         }
     }
-
-    void Voxelize(GraphicsContext& gfxContext, const Camera& camera, const ShadowCamera& shadowCamera,
-                  const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
-    {
-        // gfxContext.TransitionResource(g_VoxelColorVolume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
-        // gfxContext.TransitionResource(g_VoxelNormalVolume, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
-        // gfxContext.SetRenderTargets(0, nullptr);
-        // gfxContext.SetViewportAndScissor(viewport, scissor);
-        // {
-        //     gfxContext.SetPipelineState(m_VoxelPSO);
-        //     VoxelizeObjects(gfxContext, shadowCamera, m_OrthoCamera.GetVoxelMatrix(), camera.GetPosition(), kOpaque);
-        //     //gfxContext.SetPipelineState(m_CutoutShadowPSO);
-        //     //VoxelizeObjects(gfxContext, m_OrthoCamera, camera.GetPosition(), kCutout);
-        // }
-        // gfxContext.TransitionResource(g_VoxelColorVolume, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        // gfxContext.TransitionResource(g_VoxelNormalVolume, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    }
-
-    void GenerateMipMaps(CommandContext& context)
-    {
-        //ComputeContext& Context = BaseContext.GetComputeContext();
-
-        //Context.SetRootSignature(Graphics::g_CommonRS);
-
-        //Context.TransitionResource(*this, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        //Context.SetDynamicDescriptor(1, 0, m_SRVHandle);
-
-        //for (uint32_t TopMip = 0; TopMip < m_NumMipMaps; )
-        //{
-        //    uint32_t SrcWidth = m_Width >> TopMip;
-        //    uint32_t SrcHeight = m_Height >> TopMip;
-        //    uint32_t DstWidth = SrcWidth >> 1;
-        //    uint32_t DstHeight = SrcHeight >> 1;
-
-        //    // Determine if the first downsample is more than 2:1.  This happens whenever
-        //    // the source width or height is odd.
-        //    uint32_t NonPowerOfTwo = (SrcWidth & 1) | (SrcHeight & 1) << 1;
-        //    if (m_Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
-        //        Context.SetPipelineState(Graphics::g_GenerateMipsGammaPSO[NonPowerOfTwo]);
-        //    else
-        //        Context.SetPipelineState(Graphics::g_GenerateMipsLinearPSO[NonPowerOfTwo]);
-
-        //    // We can downsample up to four times, but if the ratio between levels is not
-        //    // exactly 2:1, we have to shift our blend weights, which gets complicated or
-        //    // expensive.  Maybe we can update the code later to compute sample weights for
-        //    // each successive downsample.  We use _BitScanForward to count number of zeros
-        //    // in the low bits.  Zeros indicate we can divide by two without truncating.
-        //    uint32_t AdditionalMips;
-        //    _BitScanForward((unsigned long*)&AdditionalMips,
-        //        (DstWidth == 1 ? DstHeight : DstWidth) | (DstHeight == 1 ? DstWidth : DstHeight));
-        //    uint32_t NumMips = 1 + (AdditionalMips > 3 ? 3 : AdditionalMips);
-        //    if (TopMip + NumMips > m_NumMipMaps)
-        //        NumMips = m_NumMipMaps - TopMip;
-
-        //    // These are clamped to 1 after computing additional mips because clamped
-        //    // dimensions should not limit us from downsampling multiple times.  (E.g.
-        //    // 16x1 -> 8x1 -> 4x1 -> 2x1 -> 1x1.)
-        //    if (DstWidth == 0)
-        //        DstWidth = 1;
-        //    if (DstHeight == 0)
-        //        DstHeight = 1;
-
-        //    Context.SetConstants(0, TopMip, NumMips, 1.0f / DstWidth, 1.0f / DstHeight);
-        //    Context.SetDynamicDescriptors(2, 0, NumMips, m_UAVHandle + TopMip + 1);
-        //    Context.Dispatch2D(DstWidth, DstHeight);
-
-        //    Context.InsertUAVBarrier(*this);
-
-        //    TopMip += NumMips;
-        //}
-
-        //Context.TransitionResource(*this, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
-        //    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    }
-
-
-    void CreateVXGIResources(VXGIResources& res, XMUINT2 resolution)
-    {
-        res.diffuse.Create(L"vxgi.diffuse", resolution.x, resolution.y, 1, DXGI_FORMAT_R11G11B10_FLOAT);
-        res.diffuse.Create(L"vxgi.specular", resolution.x, resolution.y, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
-        res.pre_clear = true;
-    }
+	*/
 
     void RefreshEnvProbes(CommandContext& BaseContext, const Math::Camera& camera)
     {
         CameraCB cb;
         cb.init();
-
         {
             const float zNearP = camera.GetNearClip();
             const float zFarP = camera.GetFarClip();
@@ -641,91 +565,87 @@ namespace VCT
         }
 
 
+
+
     }
     
     void VXGI_Voxelize(CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
         ModelH3D& model, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
     {
-        scene_gi.Update(camera);
+        g_scene_gi.Update(camera);
 
-        const SceneGI::VXGI::ClipMap& clipmap = scene_gi.vxgi.clipmaps[scene_gi.vxgi.clipmap_to_update];
+        const SceneGI::VXGI::ClipMap& clipmap = g_scene_gi.vxgi.clipmaps[g_scene_gi.vxgi.clipmap_to_update];
 
         //Primitive::AABB bbox;
         //bbox.createFromHalfWidth(clipmap.center, clipmap.extents);
 
         VoxelizerCB cb;
         cb.offsetfromPrevFrame = clipmap.offsetfromPrevFrame;
-        cb.clipmap_index = scene_gi.vxgi.clipmap_to_update;
+        cb.clipmap_index = g_scene_gi.vxgi.clipmap_to_update;
 
         GraphicsContext& gfxContext = BaseContext.GetGraphicsContext();
-        //Context.SetRootSignature();
 
-        gfxContext.SetDynamicConstantBufferView(CBSLOT_RENDERER_VOXELIZER, sizeof(VoxelizerCB), &cb);
-        if (scene_gi.vxgi.pre_clear)
+    	//gfxContext.SetDynamicConstantBufferView(CBSLOT_RENDERER_VOXELIZER, sizeof(VoxelizerCB), &cb);
+
+        if (g_scene_gi.vxgi.pre_clear)
         {
             EngineProfiling::BeginBlock(L"Pre Clear", &gfxContext);
             {
-                gfxContext.TransitionResource(scene_gi.vxgi.render_atomic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                gfxContext.TransitionResource(scene_gi.vxgi.prev_radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                gfxContext.TransitionResource(scene_gi.vxgi.radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                gfxContext.TransitionResource(scene_gi.vxgi.sdf, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                gfxContext.TransitionResource(scene_gi.vxgi.sdf_temp, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(g_scene_gi.vxgi.render_atomic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(g_scene_gi.vxgi.prev_radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(g_scene_gi.vxgi.radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(g_scene_gi.vxgi.sdf, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(g_scene_gi.vxgi.sdf_temp, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                 gfxContext.FlushResourceBarriers();
             }
-            gfxContext.ClearUAV(scene_gi.vxgi.prev_radiance);
-            gfxContext.ClearUAV(scene_gi.vxgi.radiance);
-            gfxContext.ClearUAV(scene_gi.vxgi.sdf);
-            gfxContext.ClearUAV(scene_gi.vxgi.sdf_temp);
-            gfxContext.ClearUAV(scene_gi.vxgi.render_atomic);
-            scene_gi.vxgi.pre_clear = false;;
+            gfxContext.ClearUAV(g_scene_gi.vxgi.prev_radiance);
+            gfxContext.ClearUAV(g_scene_gi.vxgi.radiance);
+            gfxContext.ClearUAV(g_scene_gi.vxgi.sdf);
+            gfxContext.ClearUAV(g_scene_gi.vxgi.sdf_temp);
+            gfxContext.ClearUAV(g_scene_gi.vxgi.render_atomic);
+            g_scene_gi.vxgi.pre_clear = false;;
             EngineProfiling::EndBlock(&gfxContext);
         }
         else
         {
             {
-                gfxContext.TransitionResource(scene_gi.vxgi.render_atomic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                gfxContext.TransitionResource(scene_gi.vxgi.prev_radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                gfxContext.TransitionResource(scene_gi.vxgi.sdf, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                gfxContext.TransitionResource(scene_gi.vxgi.sdf_temp, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(g_scene_gi.vxgi.render_atomic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(g_scene_gi.vxgi.prev_radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(g_scene_gi.vxgi.sdf, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                gfxContext.TransitionResource(g_scene_gi.vxgi.sdf_temp, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                 gfxContext.FlushResourceBarriers();
             }
 
-            EngineProfiling::BeginBlock(L"Atomic Clear", &gfxContext);
-            gfxContext.ClearUAV(scene_gi.vxgi.render_atomic);
-            EngineProfiling::EndBlock(&gfxContext);
+            {
+                EngineProfiling::BeginBlock(L"Atomic Clear", &gfxContext);
+                gfxContext.ClearUAV(g_scene_gi.vxgi.render_atomic);
+                EngineProfiling::EndBlock(&gfxContext);
+            }
 
-            EngineProfiling::BeginBlock(L"Offset Previous Voxels", &gfxContext);
-            gfxContext.SetRootSignature(m_vxgi_RootSig);
-            gfxContext.SetPipelineState(m_vxgi_offsetprev_PSO);
-            
-            // 绑定FrameCB常量缓冲区 (CBV b0, space=1) - root parameter 0
-            gfxContext.SetDynamicConstantBufferView(0, sizeof(FrameCB), g_xFrame.Map());
-            g_xFrame.Unmap();
-            
-            // 绑定VoxelizerCB常量缓冲区 (CBV b1, space=1) - root parameter 1
-            gfxContext.SetDynamicConstantBufferView(1, sizeof(VoxelizerCB), g_xVoxelizer.Map());
-            g_xVoxelizer.Unmap();
-            
-            // 绑定额外的CBV (CBV b2, space=1) - root parameter 2
-            // gfxContext.SetDynamicConstantBufferView(2, sizeof(SomeOtherCB), someOtherData);
-            
-            // 绑定额外的CBV (CBV b3, space=1) - root parameter 3
-            // gfxContext.SetDynamicConstantBufferView(3, sizeof(SomeOtherCB), someOtherData);
-            
-            // 绑定SRV资源 (SRV t0) - root parameter 4
-            gfxContext.SetDescriptorTable(4, scene_gi.vxgi.radiance.GetSRV());
-            
-            // 绑定UAV资源 (UAV u0) - root parameter 5
-            gfxContext.SetDescriptorTable(5, scene_gi.vxgi.prev_radiance.GetUAV());
-            
-            // 计算dispatch参数
-            uint32_t dispatchSize = scene_gi.vxgi.res / 8;
-            gfxContext.Dispatch(dispatchSize, dispatchSize, dispatchSize);
-            
-            EngineProfiling::EndBlock(&gfxContext);
+            {
+                EngineProfiling::BeginBlock(L"Offset Previous Voxels", &gfxContext);
+                ComputeContext& Context = BaseContext.GetComputeContext();
+                Context.SetRootSignature(m_vxgi_RootSig);
+                Context.SetPipelineState(m_vxgi_offsetprev_PSO);
+                Context.SetConstantBuffer(3, g_xFrame.GetGpuVirtualAddress());
+                Context.SetConstantBuffer(5, g_xVoxelizer.GetGpuVirtualAddress());
+                Context.SetDynamicDescriptor(7, 0, g_scene_gi.vxgi.radiance.GetSRV());
+                Context.SetDynamicDescriptor(8, 0, g_scene_gi.vxgi.prev_radiance.GetUAV());
+                uint32_t dispatchSize = g_scene_gi.vxgi.res / 8;
+                Context.Dispatch(dispatchSize, dispatchSize, dispatchSize);
+                EngineProfiling::EndBlock(&gfxContext);
+            }
         }
 
+        /*
         {
+            EngineProfiling::BeginBlock(L"Voxelize", &gfxContext);
+            gfxContext.SetViewport(0, 0, scene_gi.vxgi.res, scene_gi.vxgi.res);
+
+
+            EngineProfiling::EndBlock(&gfxContext);
+
+
             device->EventBegin("Voxelize", cmd);
 
             Viewport vp;
@@ -816,12 +736,14 @@ namespace VCT
 
             device->EventEnd(cmd);
         }
+		*/
     }
 
     void VXGI_Resolve(
         CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
     {
+        /*
         if (!GetVXGIEnabled() || !scene.vxgi.radiance.IsValid())
         {
             return;
@@ -914,6 +836,7 @@ namespace VCT
 
         wi::profiler::EndRange(range);
         device->EventEnd(cmd);
+		*/
     }
 
 }
