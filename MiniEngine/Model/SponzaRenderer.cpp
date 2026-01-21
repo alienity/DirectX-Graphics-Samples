@@ -149,6 +149,8 @@ void Sponza::Startup( Camera& Camera )
         }
     }
 
+    VCT::Startup(Camera, m_Model);
+
     ParticleEffects::InitFromJSON(L"Sponza/particles.json");
 
     float modelRadius = Length(m_Model.GetBoundingBox().GetDimensions()) * 0.5f;
@@ -156,8 +158,6 @@ void Sponza::Startup( Camera& Camera )
     Camera.SetEyeAtUp( eye, Vector3(kZero), Vector3(kYUnitVector) );
 
     Lighting::CreateRandomLights(m_Model.GetBoundingBox().GetMin(), m_Model.GetBoundingBox().GetMax());
-
-    VCT::Startup(Camera, m_Model);
 }
 
 const ModelH3D& Sponza::GetModel()

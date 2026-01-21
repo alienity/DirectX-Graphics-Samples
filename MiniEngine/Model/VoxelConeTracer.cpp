@@ -6,10 +6,9 @@
 #include "TemporalEffects.h"
 #include "VoxelConeTracer.h"
 #include "Renderer.h"
+#include "DirectXCollision.h"
 
-// From Model
 #include <cmath>
-
 #include "ModelH3D.h"
 
 #include "CompiledShaders/VXGIVoxelizationVS.h"
@@ -24,6 +23,633 @@
 
 using namespace Graphics;
 using namespace Math;
+
+
+using float3x3 = XMFLOAT3X3;
+using float4x4 = XMFLOAT4X4;
+using float2 = XMFLOAT2;
+using float3 = XMFLOAT3;
+using float4 = XMFLOAT4;
+using uint = uint32_t;
+using uint2 = XMUINT2;
+using uint3 = XMUINT3;
+using uint4 = XMUINT4;
+using int2 = XMINT2;
+using int3 = XMINT3;
+using int4 = XMINT4;
+
+#define CBSLOT_RENDERER_FRAME					0
+#define CBSLOT_RENDERER_CAMERA					1
+#define CBSLOT_RENDERER_VOXELIZER				3
+
+namespace VCT
+{
+    class OrthoVoxelCamera : public Math::BaseCamera
+    {
+    public:
+        OrthoVoxelCamera()
+        {
+        }
+
+        void UpdateMatrix(Math::Vector3 ForwardDirection, Math::Vector3 CameraCenter, Math::Vector3 VoxelBounds,
+            float VoxelSize);
+
+        // Used to transform world space to texture space for voxel sampling
+        const Math::Matrix4& GetVoxelMatrix() const { return m_VoxelMatrix; }
+
+    private:
+        Math::Matrix4 m_VoxelMatrix;
+    };
+}
+
+namespace VCT
+{
+    // If enabled, geometry shader will be used to voxelize, and axis will be selected by geometry shader
+    //	If disabled, vertex shader with instance replication will be used for each axis
+#define VOXELIZATION_GEOMETRY_SHADER_ENABLED
+
+    // Number of clipmaps, each doubling in size:
+    static const uint VXGI_CLIPMAP_COUNT = 6;
+
+    struct alignas(16) VoxelClipMap
+    {
+        float3 center; // center of clipmap volume in world space
+        float voxelSize; // half-extent of one voxel
+    };
+
+    struct alignas(16) VXGI
+    {
+        uint resolution; // voxel grid resolution
+        float resolution_rcp; // 1.0 / voxel grid resolution
+        float stepsize; // raymarch step size in voxel space units
+        float max_distance; // maximum raymarch distance for voxel GI in world-space
+
+        //int texture_radiance;
+        //int texture_sdf;
+        //int padding0;
+        //int padding1;
+
+        VoxelClipMap clipmaps[VXGI_CLIPMAP_COUNT];
+    };
+
+    struct alignas(16) VoxelizerCB
+    {
+        int3 offsetfromPrevFrame;
+        int clipmap_index;
+    };
+
+    enum VOXELIZATION_CHANNEL
+    {
+        VOXELIZATION_CHANNEL_BASECOLOR_R,
+        VOXELIZATION_CHANNEL_BASECOLOR_G,
+        VOXELIZATION_CHANNEL_BASECOLOR_B,
+        VOXELIZATION_CHANNEL_BASECOLOR_A,
+        VOXELIZATION_CHANNEL_EMISSIVE_R,
+        VOXELIZATION_CHANNEL_EMISSIVE_G,
+        VOXELIZATION_CHANNEL_EMISSIVE_B,
+        VOXELIZATION_CHANNEL_DIRECTLIGHT_R,
+        VOXELIZATION_CHANNEL_DIRECTLIGHT_G,
+        VOXELIZATION_CHANNEL_DIRECTLIGHT_B,
+        VOXELIZATION_CHANNEL_NORMAL_R,
+        VOXELIZATION_CHANNEL_NORMAL_G,
+        VOXELIZATION_CHANNEL_FRAGMENT_COUNTER,
+
+        VOXELIZATION_CHANNEL_COUNT,
+    };
+
+
+    // Cones from: https://github.com/compix/VoxelConeTracingGI/blob/master/assets/shaders/voxelConeTracing/finalLightingPass.frag
+
+    //#define USE_32_CONES
+#ifdef USE_32_CONES
+    // 32 Cones for higher quality (16 on average per hemisphere)
+    static const int DIFFUSE_CONE_COUNT = 32;
+    static const float DIFFUSE_CONE_APERTURE = 0.628319f;
+
+    static const float3 DIFFUSE_CONE_DIRECTIONS[32] = {
+        float3(0.898904f, 0.435512f, 0.0479745f),
+        float3(0.898904f, -0.435512f, -0.0479745f),
+        float3(0.898904f, 0.0479745f, -0.435512f),
+        float3(0.898904f, -0.0479745f, 0.435512f),
+        float3(-0.898904f, 0.435512f, -0.0479745f),
+        float3(-0.898904f, -0.435512f, 0.0479745f),
+        float3(-0.898904f, 0.0479745f, 0.435512f),
+        float3(-0.898904f, -0.0479745f, -0.435512f),
+        float3(0.0479745f, 0.898904f, 0.435512f),
+        float3(-0.0479745f, 0.898904f, -0.435512f),
+        float3(-0.435512f, 0.898904f, 0.0479745f),
+        float3(0.435512f, 0.898904f, -0.0479745f),
+        float3(-0.0479745f, -0.898904f, 0.435512f),
+        float3(0.0479745f, -0.898904f, -0.435512f),
+        float3(0.435512f, -0.898904f, 0.0479745f),
+        float3(-0.435512f, -0.898904f, -0.0479745f),
+        float3(0.435512f, 0.0479745f, 0.898904f),
+        float3(-0.435512f, -0.0479745f, 0.898904f),
+        float3(0.0479745f, -0.435512f, 0.898904f),
+        float3(-0.0479745f, 0.435512f, 0.898904f),
+        float3(0.435512f, -0.0479745f, -0.898904f),
+        float3(-0.435512f, 0.0479745f, -0.898904f),
+        float3(0.0479745f, 0.435512f, -0.898904f),
+        float3(-0.0479745f, -0.435512f, -0.898904f),
+        float3(0.57735f, 0.57735f, 0.57735f),
+        float3(0.57735f, 0.57735f, -0.57735f),
+        float3(0.57735f, -0.57735f, 0.57735f),
+        float3(0.57735f, -0.57735f, -0.57735f),
+        float3(-0.57735f, 0.57735f, 0.57735f),
+        float3(-0.57735f, 0.57735f, -0.57735f),
+        float3(-0.57735f, -0.57735f, 0.57735f),
+        float3(-0.57735f, -0.57735f, -0.57735f)
+    };
+#else // 16 cones for lower quality (8 on average per hemisphere)
+    static const int DIFFUSE_CONE_COUNT = 16;
+    static const float DIFFUSE_CONE_APERTURE = 0.872665f;
+
+    static const float3 DIFFUSE_CONE_DIRECTIONS[16] = {
+        float3(0.57735f, 0.57735f, 0.57735f),
+        float3(0.57735f, -0.57735f, -0.57735f),
+        float3(-0.57735f, 0.57735f, -0.57735f),
+        float3(-0.57735f, -0.57735f, 0.57735f),
+        float3(-0.903007f, -0.182696f, -0.388844f),
+        float3(-0.903007f, 0.182696f, 0.388844f),
+        float3(0.903007f, -0.182696f, 0.388844f),
+        float3(0.903007f, 0.182696f, -0.388844f),
+        float3(-0.388844f, -0.903007f, -0.182696f),
+        float3(0.388844f, -0.903007f, 0.182696f),
+        float3(0.388844f, 0.903007f, -0.182696f),
+        float3(-0.388844f, 0.903007f, 0.182696f),
+        float3(-0.182696f, -0.388844f, -0.903007f),
+        float3(0.182696f, 0.388844f, -0.903007f),
+        float3(-0.182696f, 0.388844f, 0.903007f),
+        float3(0.182696f, -0.388844f, 0.903007f)
+    };
+#endif
+
+    struct alignas(16) FrameCB
+    {
+        uint options; // wi::renderer bool options packed into bitmask (OPTION_BIT_ values)
+        float time;
+        float time_previous;
+        float delta_time;
+
+        uint frame_count;
+        uint temporalaa_samplerotation;
+        int texture_shadowatlas_index;
+        int texture_shadowatlas_transparent_index;
+
+        VXGI vxgi;
+    };
+
+    struct alignas(16) ShaderSphere
+    {
+        float3 center;
+        float radius;
+    };
+
+    struct alignas(16) ShaderClusterBounds
+    {
+        ShaderSphere sphere;
+
+        float3 cone_axis;
+        float cone_cutoff;
+    };
+
+    struct alignas(16) ShaderFrustum
+    {
+        // Frustum planes:
+        //	0 : near
+        //	1 : far
+        //	2 : left
+        //	3 : right
+        //	4 : top
+        //	5 : bottom
+        float4 planes[6];
+    };
+
+    struct alignas(16) ShaderFrustumCorners
+    {
+        // topleft, topright, bottomleft, bottomright
+        float4 cornersNEAR[4];
+        float4 cornersFAR[4];
+    };
+
+    struct alignas(16) ShaderCamera
+    {
+        float4x4	view_projection;
+
+        float3		position;
+        uint		output_index; // viewport or rendertarget array index
+
+        float4		clip_plane;
+        float4		reflection_plane; // not clip plane (not reversed when camera is under), but the original plane
+
+        float3		forward;
+        float		z_near;
+
+        float3		up;
+        float		z_far;
+
+        float		z_near_rcp;
+        float		z_far_rcp;
+        float		z_range;
+        float		z_range_rcp;
+
+        float4x4	view;
+        float4x4	projection;
+        float4x4	inverse_view;
+        float4x4	inverse_projection;
+        float4x4	inverse_view_projection;
+
+        ShaderFrustum frustum;
+        ShaderFrustumCorners frustum_corners;
+
+        float2		temporalaa_jitter;
+        float2		temporalaa_jitter_prev;
+
+        float4x4	previous_view;
+        float4x4	previous_projection;
+        float4x4	previous_view_projection;
+        float4x4	previous_inverse_view_projection;
+        float4x4	reflection_view_projection;
+        float4x4	reflection_inverse_view_projection;
+        float4x4	reprojection; // view_projection_inverse_matrix * previous_view_projection_matrix
+
+        float2		aperture_shape;
+        float		aperture_size;
+        float		focal_length;
+
+        float2 canvas_size;
+        float2 canvas_size_rcp;
+
+        uint2 internal_resolution;
+        float2 internal_resolution_rcp;
+
+        uint4 scissor; // scissor in physical coordinates (left,top,right,bottom) range: [0, internal_resolution]
+        float4 scissor_uv; // scissor in screen UV coordinates (left,top,right,bottom) range: [0, 1]
+
+        inline void init()
+        {
+            view_projection = {};
+            position = {};
+            output_index = 0;
+            clip_plane = {};
+            forward = {};
+            z_near = {};
+            up = {};
+            z_far = {};
+            z_near_rcp = {};
+            z_far_rcp = {};
+            z_range = {};
+            z_range_rcp = {};
+            view = {};
+            projection = {};
+            inverse_view = {};
+            inverse_projection = {};
+            inverse_view_projection = {};
+        }
+    };
+
+    struct alignas(16) CameraCB
+    {
+        ShaderCamera cameras[16];
+
+        inline void init()
+        {
+            for (int i = 0; i < 16; ++i)
+            {
+                cameras[i].init();
+            }
+        }
+    };
+}
+
+namespace VCT
+{
+    struct Sphere;
+    struct Ray;
+    struct AABB;
+    struct Capsule;
+    struct Plane;
+
+    struct alignas(16) AABB
+    {
+        enum INTERSECTION_TYPE
+        {
+            OUTSIDE,
+            INTERSECTS,
+            INSIDE,
+        };
+
+        XMFLOAT3 _min;
+        uint32_t layerMask = ~0u;
+        XMFLOAT3 _max;
+        uint32_t userdata = 0;
+
+        AABB(
+            const XMFLOAT3& _min = XMFLOAT3(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
+                std::numeric_limits<float>::max()),
+            const XMFLOAT3& _max = XMFLOAT3(std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(),
+                std::numeric_limits<float>::lowest())
+        ) : _min(_min), _max(_max)
+        {
+        }
+
+        void createFromHalfWidth(const XMFLOAT3& center, const XMFLOAT3& halfwidth);
+        AABB transform(const XMMATRIX& mat) const;
+        AABB transform(const XMFLOAT4X4& mat) const;
+        XMFLOAT3 getCenter() const;
+        XMFLOAT3 getHalfWidth() const;
+        XMMATRIX getAsBoxMatrix() const;
+        XMMATRIX getUnormRemapMatrix() const;
+        float getArea() const;
+        float getRadius() const;
+        INTERSECTION_TYPE intersects2D(const AABB& b) const;
+        INTERSECTION_TYPE intersects(const AABB& b) const;
+        bool intersects(const XMFLOAT3& p) const;
+        bool intersects(const XMVECTOR& P) const;
+        bool intersects(const Ray& ray) const;
+        bool intersects(const Sphere& sphere) const;
+        bool intersects(const BoundingFrustum& frustum) const;
+        bool intersects(const BoundingBox& other) const;
+        bool intersects(const BoundingOrientedBox& other) const;
+        AABB operator*(float a);
+        static AABB Merge(const AABB& a, const AABB& b);
+        void AddPoint(const XMFLOAT3& pos);
+        void AddPoint(const XMVECTOR& P);
+
+        // projects the AABB to the screen, returns a 2D rectangle in UV-space as Vector(topleftX, topleftY, bottomrightX, bottomrightY), each value is in range [0, 1]
+        XMFLOAT4 ProjectToScreen(const XMMATRIX& ViewProjection) const;
+
+        constexpr XMFLOAT3 getMin() const { return _min; }
+        constexpr XMFLOAT3 getMax() const { return _max; }
+
+        constexpr XMFLOAT3 corner(int index) const
+        {
+            switch (index)
+            {
+            case 0: return _min;
+            case 1: return XMFLOAT3(_min.x, _max.y, _min.z);
+            case 2: return XMFLOAT3(_min.x, _max.y, _max.z);
+            case 3: return XMFLOAT3(_min.x, _min.y, _max.z);
+            case 4: return XMFLOAT3(_max.x, _min.y, _min.z);
+            case 5: return XMFLOAT3(_max.x, _max.y, _min.z);
+            case 6: return _max;
+            case 7: return XMFLOAT3(_max.x, _min.y, _max.z);
+            }
+            assert(0);
+            return XMFLOAT3(0, 0, 0);
+        }
+
+        constexpr bool IsValid() const
+        {
+            if (_min.x > _max.x || _min.y > _max.y || _min.z > _max.z)
+                return false;
+            return true;
+        }
+    };
+
+    struct Sphere
+    {
+        XMFLOAT3 center;
+        float radius;
+
+        Sphere() : center(XMFLOAT3(0, 0, 0)), radius(0)
+        {
+        }
+
+        Sphere(const XMFLOAT3& c, float r) : center(c), radius(r)
+        {
+            assert(radius >= 0);
+        }
+
+        bool intersects(const XMVECTOR& P) const;
+        bool intersects(const XMFLOAT3& P) const;
+        bool intersects(const AABB& b) const;
+        bool intersects(const Sphere& b) const;
+        bool intersects(const Sphere& b, float& dist) const;
+        bool intersects(const Sphere& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const Capsule& b) const;
+        bool intersects(const Capsule& b, float& dist) const;
+        bool intersects(const Capsule& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const Plane& b) const;
+        bool intersects(const Plane& b, float& dist) const;
+        bool intersects(const Plane& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const Ray& b) const;
+        bool intersects(const Ray& b, float& dist) const;
+        bool intersects(const Ray& b, float& dist, XMFLOAT3& direction) const;
+
+        // Construct a matrix that will orient to position according to surface normal:
+        XMFLOAT4X4 GetPlacementOrientation(const XMFLOAT3& position, const XMFLOAT3& normal) const;
+    };
+
+    struct Capsule
+    {
+        XMFLOAT3 base = XMFLOAT3(0, 0, 0);
+        XMFLOAT3 tip = XMFLOAT3(0, 0, 0);
+        float radius = 0;
+        Capsule() = default;
+
+        Capsule(const XMFLOAT3& base, const XMFLOAT3& tip, float radius) : base(base), tip(tip), radius(radius)
+        {
+            assert(radius >= 0);
+        }
+
+        Capsule(XMVECTOR base, XMVECTOR tip, float radius) : radius(radius)
+        {
+            assert(radius >= 0);
+            XMStoreFloat3(&this->base, base);
+            XMStoreFloat3(&this->tip, tip);
+        }
+
+        Capsule(const Sphere& sphere, float height) :
+            base(XMFLOAT3(sphere.center.x, sphere.center.y - sphere.radius, sphere.center.z)),
+            tip(XMFLOAT3(base.x, base.y + height, base.z)),
+            radius(sphere.radius)
+        {
+            assert(radius >= 0);
+        }
+
+        inline Sphere getSphere() const
+        {
+            XMVECTOR B = XMLoadFloat3(&base);
+            XMVECTOR T = XMLoadFloat3(&tip);
+            Sphere ret;
+            XMStoreFloat3(&ret.center, XMVectorLerp(B, T, 0.5f));
+            XMStoreFloat(&ret.radius, XMVector3Length(B - T) * 0.5f);
+            return ret;
+        }
+
+        inline AABB getAABB() const
+        {
+            XMFLOAT3 halfWidth = XMFLOAT3(radius, radius, radius);
+            AABB base_aabb;
+            base_aabb.createFromHalfWidth(base, halfWidth);
+            AABB tip_aabb;
+            tip_aabb.createFromHalfWidth(tip, halfWidth);
+            AABB result = AABB::Merge(base_aabb, tip_aabb);
+            assert(result.IsValid());
+            return result;
+        }
+
+        bool intersects(const Capsule& b, XMFLOAT3& position, XMFLOAT3& incident_normal,
+            float& penetration_depth) const;
+        bool intersects(const Sphere& b) const;
+        bool intersects(const Sphere& b, float& dist) const;
+        bool intersects(const Sphere& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const Plane& b) const;
+        bool intersects(const Plane& b, float& dist) const;
+        bool intersects(const Plane& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const Ray& b) const;
+        bool intersects(const Ray& b, float& dist) const;
+        bool intersects(const Ray& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const XMFLOAT3& point) const;
+
+        // Construct a matrix that will orient to position according to surface normal:
+        XMFLOAT4X4 GetPlacementOrientation(const XMFLOAT3& position, const XMFLOAT3& normal) const;
+    };
+
+    struct Plane
+    {
+        XMFLOAT3 origin = {};
+        XMFLOAT3 normal = {};
+        XMFLOAT4X4 projection = XMFLOAT4X4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+
+        bool intersects(const Sphere& b) const;
+        bool intersects(const Sphere& b, float& dist) const;
+        bool intersects(const Sphere& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const Capsule& b) const;
+        bool intersects(const Capsule& b, float& dist) const;
+        bool intersects(const Capsule& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const Ray& b) const;
+        bool intersects(const Ray& b, float& dist) const;
+        bool intersects(const Ray& b, float& dist, XMFLOAT3& direction) const;
+    };
+
+    struct Ray
+    {
+        XMFLOAT3 origin;
+        float TMin = 0;
+        XMFLOAT3 direction;
+        float TMax = std::numeric_limits<float>::max();
+        XMFLOAT3 direction_inverse;
+
+        Ray(const XMFLOAT3& newOrigin = XMFLOAT3(0, 0, 0), const XMFLOAT3& newDirection = XMFLOAT3(0, 0, 1),
+            float newTMin = 0, float newTMax = std::numeric_limits<float>::max()) :
+            Ray(XMLoadFloat3(&newOrigin), XMLoadFloat3(&newDirection), newTMin, newTMax)
+        {
+        }
+
+        Ray(const XMVECTOR& newOrigin, const XMVECTOR& newDirection, float newTMin = 0,
+            float newTMax = std::numeric_limits<float>::max())
+        {
+            XMStoreFloat3(&origin, newOrigin);
+            XMStoreFloat3(&direction, newDirection);
+            XMStoreFloat3(&direction_inverse, XMVectorReciprocal(newDirection));
+            TMin = newTMin;
+            TMax = newTMax;
+        }
+
+        bool intersects(const AABB& b) const;
+        bool intersects(const Sphere& b) const;
+        bool intersects(const Sphere& b, float& dist) const;
+        bool intersects(const Sphere& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const Capsule& b) const;
+        bool intersects(const Capsule& b, float& dist) const;
+        bool intersects(const Capsule& b, float& dist, XMFLOAT3& direction) const;
+        bool intersects(const Plane& b) const;
+        bool intersects(const Plane& b, float& dist) const;
+        bool intersects(const Plane& b, float& dist, XMFLOAT3& direction) const;
+
+        void CreateFromPoints(const XMFLOAT3& a, const XMFLOAT3& b);
+
+        // Construct a matrix that will orient to position according to surface normal:
+        XMFLOAT4X4 GetPlacementOrientation(const XMFLOAT3& position, const XMFLOAT3& normal) const;
+    };
+
+    struct Frustum
+    {
+        XMFLOAT4 planes[6];
+
+        void Create(const XMMATRIX& viewProjection);
+
+        bool CheckPoint(const XMFLOAT3&) const;
+        bool CheckSphere(const XMFLOAT3&, float) const;
+
+        enum BoxFrustumIntersect
+        {
+            BOX_FRUSTUM_OUTSIDE,
+            BOX_FRUSTUM_INTERSECTS,
+            BOX_FRUSTUM_INSIDE,
+        };
+
+        BoxFrustumIntersect CheckBox(const AABB& box) const;
+        bool CheckBoxFast(const AABB& box) const;
+
+        const XMFLOAT4& getNearPlane() const;
+        const XMFLOAT4& getFarPlane() const;
+        const XMFLOAT4& getLeftPlane() const;
+        const XMFLOAT4& getRightPlane() const;
+        const XMFLOAT4& getTopPlane() const;
+        const XMFLOAT4& getBottomPlane() const;
+    };
+
+    class Hitbox2D
+    {
+    public:
+        XMFLOAT2 pos;
+        XMFLOAT2 siz;
+
+        Hitbox2D() : pos(XMFLOAT2(0, 0)), siz(XMFLOAT2(0, 0))
+        {
+        }
+
+        Hitbox2D(const XMFLOAT2& newPos, const XMFLOAT2 newSiz) : pos(newPos), siz(newSiz)
+        {
+        }
+
+        ~Hitbox2D()
+        {
+        };
+
+        bool intersects(const XMFLOAT2& b) const;
+        bool intersects(const Hitbox2D& b) const;
+    };
+}
+
+namespace VCT
+{
+    class SceneGI
+    {
+    public:
+        // Voxel GI resources:
+        struct VXGI
+        {
+            uint32_t res = 64;
+            float rayStepSize = 1;
+            float maxDistance = 100.0f;
+
+            struct ClipMap
+            {
+                float voxelsize = 0.125;
+                XMFLOAT3 center = XMFLOAT3(0, 0, 0);
+                XMINT3 offsetfromPrevFrame = XMINT3(0, 0, 0);
+                XMFLOAT3 extents = XMFLOAT3(0, 0, 0);
+            } clipmaps[VXGI_CLIPMAP_COUNT];
+
+            uint32_t clipmap_to_update = 0;
+
+            VolumeBuffer radiance;
+            VolumeBuffer prev_radiance;
+            VolumeBuffer render_atomic;
+            VolumeBuffer sdf;
+            VolumeBuffer sdf_temp;
+            mutable bool pre_clear = true;
+        } vxgi;
+
+        void Destroy();
+        void Update(const Math::Camera& camera);
+    };
+}
+
 
 namespace VCT
 {
@@ -134,7 +760,6 @@ namespace VCT
 {
     enum eObjectFilter { kOpaque = 0x1, kCutout = 0x2, kTransparent = 0x4, kAll = 0xF, kNone = 0x0 };
 
-    ModelH3D m_Model;
     std::vector<bool> m_pMaterialIsCutout;
 
     OrthoVoxelCamera m_OrthoCamera;
@@ -167,132 +792,80 @@ namespace VCT
         uint32_t sceneWidth = g_SceneColorBuffer.GetWidth();
         uint32_t sceneHeight = g_SceneColorBuffer.GetHeight();
 
-        // DXGI_FORMAT ColorFormat = g_SceneColorBuffer.GetFormat();
-        // DXGI_FORMAT NormalFormat = g_SceneNormalBuffer.GetFormat();
-        // DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();
-
         D3D12_INPUT_ELEMENT_DESC vertElem[] =
         {
-            {
-                "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            },
-            {
-                "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            },
-            {
-                "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            },
-            {
-                "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            },
-            {
-                "BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT,
-                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            }
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
         };
 
         SamplerDesc DefaultSamplerDesc;
         DefaultSamplerDesc.MaxAnisotropy = 8;
 
         SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
-        //CubeMapSamplerDesc.MaxLOD = 6.0f;
 
-        m_vxgi_RootSig.Reset(9, 13); // 9个根参数，13个静态采样器
-        
-        // 根常量: 12个32位常量，寄存器b999
-        m_vxgi_RootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0);
-        
-        // CBV: b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL
-        m_vxgi_RootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL, 0);
-        
-        // CBV: b1, space = 0, visibility = SHADER_VISIBILITY_PIXEL
-        m_vxgi_RootSig[2].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_PIXEL, 0);
-        
-        // CBV: b0, space = 1, visibility = SHADER_VISIBILITY_ALL
-        m_vxgi_RootSig[3].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL, 1);
-        
-        // CBV: b1, space = 1, visibility = SHADER_VISIBILITY_ALL
-        m_vxgi_RootSig[4].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_ALL, 1);
-        
-        // CBV: b2, space = 1, visibility = SHADER_VISIBILITY_ALL
-        m_vxgi_RootSig[5].InitAsConstantBuffer(2, D3D12_SHADER_VISIBILITY_ALL, 1);
-        
-        // 描述符表: CBV(b3, space = 1, numDescriptors = 10)
-        m_vxgi_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 3, 10, D3D12_SHADER_VISIBILITY_ALL, 1);
-        
-        // 描述符表: SRV(t0, numDescriptors = 20)
-        m_vxgi_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_ALL, 0);
-        
-        // 描述符表: UAV(u0, numDescriptors = 10)
-        m_vxgi_RootSig[8].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0);
-        
-        // 静态采样器
+        m_vxgi_RootSig.Reset(9, 13);
+        m_vxgi_RootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0); // 根常量: 12个32位常量，寄存器b999
+        m_vxgi_RootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL, 0); // CBV: b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_RootSig[2].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_PIXEL, 0); // CBV: b1, space = 0, visibility = SHADER_VISIBILITY_PIXEL
+        m_vxgi_RootSig[3].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL, 1); // CBV: b0, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_RootSig[4].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_ALL, 1); // CBV: b1, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_RootSig[5].InitAsConstantBuffer(2, D3D12_SHADER_VISIBILITY_ALL, 1); // CBV: b2, space = 1, visibility = SHADER_VISIBILITY_ALL
+        m_vxgi_RootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 3, 10, D3D12_SHADER_VISIBILITY_ALL, 1); // 描述符表: CBV(b3, space = 1, numDescriptors = 10)
+        m_vxgi_RootSig[7].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_ALL, 0); // 描述符表: SRV(t0, numDescriptors = 20)
+        m_vxgi_RootSig[8].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0); // 描述符表: UAV(u0, numDescriptors = 10)
         m_vxgi_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
         m_vxgi_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
         m_vxgi_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-        
-        // 其他静态采样器
         SamplerDesc linearClampSamplerDesc = {};
         linearClampSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         m_vxgi_RootSig.InitStaticSampler(100, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         m_vxgi_RootSig.InitStaticSampler(101, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
         m_vxgi_RootSig.InitStaticSampler(102, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         linearClampSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         m_vxgi_RootSig.InitStaticSampler(103, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         m_vxgi_RootSig.InitStaticSampler(104, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
         m_vxgi_RootSig.InitStaticSampler(105, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         linearClampSamplerDesc.Filter = D3D12_FILTER_ANISOTROPIC;
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.MaxAnisotropy = 16;
         m_vxgi_RootSig.InitStaticSampler(106, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         m_vxgi_RootSig.InitStaticSampler(107, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
         m_vxgi_RootSig.InitStaticSampler(108, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         linearClampSamplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
         linearClampSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         linearClampSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         m_vxgi_RootSig.InitStaticSampler(109, linearClampSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-        
         m_vxgi_RootSig.Finalize(L"VoxelRootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
         D3D12_RASTERIZER_DESC VoxelizationRasterizer;
@@ -318,19 +891,20 @@ namespace VCT
         VoxelizationBlendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
         VoxelizationBlendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_MAX;
         VoxelizationBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
+        
         m_vxgi_voxelization_PSO.SetRootSignature(m_vxgi_RootSig);
         m_vxgi_voxelization_PSO.SetRasterizerState(VoxelizationRasterizer);
         m_vxgi_voxelization_PSO.SetBlendState(VoxelizationBlendDesc);
         m_vxgi_voxelization_PSO.SetDepthStencilState(DepthStateDisabled);
+        m_vxgi_voxelization_PSO.SetSampleMask(0xFFFFFFFF);
         m_vxgi_voxelization_PSO.SetInputLayout(_countof(vertElem), vertElem);
         m_vxgi_voxelization_PSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
-        m_vxgi_voxelization_PSO.SetRenderTargetFormats(0, nullptr, DXGI_FORMAT_UNKNOWN);
         m_vxgi_voxelization_PSO.SetVertexShader(g_pVXGIVoxelizationVS, sizeof(g_pVXGIVoxelizationVS));
         m_vxgi_voxelization_PSO.SetGeometryShader(g_pVXGIVoxelizationGS, sizeof(g_pVXGIVoxelizationGS));
         m_vxgi_voxelization_PSO.SetPixelShader(g_pVXGIVoxelizationPS, sizeof(g_pVXGIVoxelizationPS));
+        m_vxgi_voxelization_PSO.SetRenderTargetFormats(0, nullptr, DXGI_FORMAT_UNKNOWN);
         m_vxgi_voxelization_PSO.Finalize();
-
+        
         m_vxgi_offsetprev_PSO.SetRootSignature(m_vxgi_RootSig);
         m_vxgi_offsetprev_PSO.SetComputeShader(g_pVXGIOffsetprevCS, sizeof(g_pVXGIOffsetprevCS));
         m_vxgi_offsetprev_PSO.Finalize();
@@ -351,14 +925,12 @@ namespace VCT
         m_vxgi_resolve_specular_PSO.SetRootSignature(m_vxgi_RootSig);
         m_vxgi_resolve_specular_PSO.SetComputeShader(g_pVXGIResolveSpecularCS, sizeof(g_pVXGIResolveSpecularCS));
         m_vxgi_resolve_specular_PSO.Finalize();
-
-        m_Model = model;
-
+        
         // The caller of this function can override which materials are considered cutouts
         m_pMaterialIsCutout.resize(model.GetMaterialCount());
-        for (uint32_t i = 0; i < m_Model.GetMaterialCount(); ++i)
+        for (uint32_t i = 0; i < model.GetMaterialCount(); ++i)
         {
-            const ModelH3D::Material& mat = m_Model.GetMaterial(i);
+            const ModelH3D::Material& mat = model.GetMaterial(i);
             if (std::string(mat.texDiffusePath).find("thorn") != std::string::npos ||
                 std::string(mat.texDiffusePath).find("plant") != std::string::npos ||
                 std::string(mat.texDiffusePath).find("chain") != std::string::npos)
@@ -622,19 +1194,19 @@ namespace VCT
                 EngineProfiling::EndBlock(&gfxContext);
             }
 
-            {
-                EngineProfiling::BeginBlock(L"Offset Previous Voxels", &gfxContext);
-                ComputeContext& Context = BaseContext.GetComputeContext();
-                Context.SetRootSignature(m_vxgi_RootSig);
-                Context.SetPipelineState(m_vxgi_offsetprev_PSO);
-                Context.SetConstantBuffer(3, g_xFrame.GetGpuVirtualAddress());
-                Context.SetConstantBuffer(5, g_xVoxelizer.GetGpuVirtualAddress());
-                Context.SetDynamicDescriptor(7, 0, g_scene_gi.vxgi.radiance.GetSRV());
-                Context.SetDynamicDescriptor(8, 0, g_scene_gi.vxgi.prev_radiance.GetUAV());
-                uint32_t dispatchSize = g_scene_gi.vxgi.res / 8;
-                Context.Dispatch(dispatchSize, dispatchSize, dispatchSize);
-                EngineProfiling::EndBlock(&gfxContext);
-            }
+            //{
+            //    EngineProfiling::BeginBlock(L"Offset Previous Voxels", &gfxContext);
+            //    ComputeContext& Context = BaseContext.GetComputeContext();
+            //    Context.SetRootSignature(m_vxgi_RootSig);
+            //    Context.SetPipelineState(m_vxgi_offsetprev_PSO);
+            //    Context.SetConstantBuffer(3, g_xFrame.GetGpuVirtualAddress());
+            //    Context.SetConstantBuffer(5, g_xVoxelizer.GetGpuVirtualAddress());
+            //    Context.SetDynamicDescriptor(7, 0, g_scene_gi.vxgi.radiance.GetSRV());
+            //    Context.SetDynamicDescriptor(8, 0, g_scene_gi.vxgi.prev_radiance.GetUAV());
+            //    uint32_t dispatchSize = g_scene_gi.vxgi.res / 8;
+            //    Context.Dispatch(dispatchSize, dispatchSize, dispatchSize);
+            //    EngineProfiling::EndBlock(&gfxContext);
+            //}
         }
 
         /*
