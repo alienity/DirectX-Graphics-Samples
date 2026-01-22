@@ -149,7 +149,7 @@ void Sponza::Startup( Camera& Camera )
         }
     }
 
-    VCT::Startup(Camera, m_Model);
+    VCT::Startup();
 
     ParticleEffects::InitFromJSON(L"Sponza/particles.json");
 

@@ -770,8 +770,8 @@ namespace VCT
     SceneGI g_scene_gi;
     VXGIResources g_vxgi_resources;
 
+    UploadBuffer m_xFrameCPU;
     ByteAddressBuffer g_xFrame;
-    ByteAddressBuffer g_xVoxelizer;
 
 }
 
@@ -786,11 +786,86 @@ namespace VCT
     ComputePSO m_vxgi_resolve_diffuse_PSO(L"VXGI: Resolve Diffuse PSO");
     ComputePSO m_vxgi_resolve_specular_PSO(L"VXGI: Resolve Specular PSO");
 
-
-    void Startup(Camera& camera, ModelH3D& model)
+    void UpdateBuffers(CommandContext& BaseContext, const Camera& camera, ModelH3D& model)
     {
+        if (m_pMaterialIsCutout.size() != model.GetMaterialCount())
+        {
+            // The caller of this function can override which materials are considered cutouts
+            m_pMaterialIsCutout.resize(model.GetMaterialCount());
+            for (uint32_t i = 0; i < model.GetMaterialCount(); ++i)
+            {
+                const ModelH3D::Material& mat = model.GetMaterial(i);
+                if (std::string(mat.texDiffusePath).find("thorn") != std::string::npos ||
+                    std::string(mat.texDiffusePath).find("plant") != std::string::npos ||
+                    std::string(mat.texDiffusePath).find("chain") != std::string::npos)
+                {
+                    m_pMaterialIsCutout[i] = true;
+                }
+                else
+                {
+                    m_pMaterialIsCutout[i] = false;
+                }
+            }
+        }
+
         uint32_t sceneWidth = g_SceneColorBuffer.GetWidth();
         uint32_t sceneHeight = g_SceneColorBuffer.GetHeight();
+
+        if (!g_vxgi_resources.IsValid())
+        {
+            g_vxgi_resources.diffuse.Create(L"vxgi.diffuse", sceneWidth, sceneHeight, 1, DXGI_FORMAT_R11G11B10_FLOAT);
+            g_vxgi_resources.specular.Create(L"vxgi.specular", sceneWidth, sceneHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+            g_vxgi_resources.pre_clear = true;
+        }
+
+        g_scene_gi.Update(camera);
+
+        if (g_xFrame.GetResource() == nullptr)
+        {
+            g_xFrame.Create(L"g_xFrame", 1, sizeof(FrameCB));
+        }
+        if (m_xFrameCPU.GetResource() == nullptr)
+        {
+            m_xFrameCPU.Create(L"m_xFrameCPU", sizeof(FrameCB));
+        }
+
+        {
+            FrameCB* cb = (FrameCB*)m_xFrameCPU.Map();
+
+            cb->options = 0;
+            cb->time = 0;
+            cb->time_previous = 0;
+            cb->delta_time = 0;
+
+            cb->frame_count = 0;
+            cb->temporalaa_samplerotation = 0;
+            cb->texture_shadowatlas_index = 0;
+            cb->texture_shadowatlas_transparent_index = 0;
+
+            cb->vxgi.resolution = g_scene_gi.vxgi.res;
+            cb->vxgi.resolution_rcp = 1.0f / g_scene_gi.vxgi.res;
+            cb->vxgi.stepsize = g_scene_gi.vxgi.rayStepSize;
+            cb->vxgi.max_distance = g_scene_gi.vxgi.maxDistance;
+
+            for (uint i = 0; i < VXGI_CLIPMAP_COUNT; i++)
+            {
+                cb->vxgi.clipmaps[i].center = g_scene_gi.vxgi.clipmaps[i].center;
+                cb->vxgi.clipmaps[i].voxelSize = g_scene_gi.vxgi.clipmaps[i].voxelsize;
+            }
+
+            m_xFrameCPU.Unmap();
+
+            BaseContext.TransitionResource(g_xFrame, D3D12_RESOURCE_STATE_COPY_DEST, true);
+            BaseContext.GetCommandList()->CopyBufferRegion(g_xFrame.GetResource(), 0, m_xFrameCPU.GetResource(), 0, m_xFrameCPU.GetBufferSize());
+            BaseContext.TransitionResource(g_xFrame, D3D12_RESOURCE_STATE_GENERIC_READ);
+        }
+
+    }
+
+    void Startup()
+    {
+        //uint32_t sceneWidth = g_SceneColorBuffer.GetWidth();
+        //uint32_t sceneHeight = g_SceneColorBuffer.GetHeight();
 
         D3D12_INPUT_ELEMENT_DESC vertElem[] =
         {
@@ -917,7 +992,6 @@ namespace VCT
         m_vxgi_jumpflood_PSO.SetComputeShader(g_pVXGISDFJumpfloodCS, sizeof(g_pVXGISDFJumpfloodCS));
         m_vxgi_jumpflood_PSO.Finalize();
 
-        // 设置解析着色器的PSO
         m_vxgi_resolve_diffuse_PSO.SetRootSignature(m_vxgi_RootSig);
         m_vxgi_resolve_diffuse_PSO.SetComputeShader(g_pVXGIResolveDiffuseCS, sizeof(g_pVXGIResolveDiffuseCS));
         m_vxgi_resolve_diffuse_PSO.Finalize();
@@ -925,30 +999,6 @@ namespace VCT
         m_vxgi_resolve_specular_PSO.SetRootSignature(m_vxgi_RootSig);
         m_vxgi_resolve_specular_PSO.SetComputeShader(g_pVXGIResolveSpecularCS, sizeof(g_pVXGIResolveSpecularCS));
         m_vxgi_resolve_specular_PSO.Finalize();
-        
-        // The caller of this function can override which materials are considered cutouts
-        m_pMaterialIsCutout.resize(model.GetMaterialCount());
-        for (uint32_t i = 0; i < model.GetMaterialCount(); ++i)
-        {
-            const ModelH3D::Material& mat = model.GetMaterial(i);
-            if (std::string(mat.texDiffusePath).find("thorn") != std::string::npos ||
-                std::string(mat.texDiffusePath).find("plant") != std::string::npos ||
-                std::string(mat.texDiffusePath).find("chain") != std::string::npos)
-            {
-                m_pMaterialIsCutout[i] = true;
-            }
-            else
-            {
-                m_pMaterialIsCutout[i] = false;
-            }
-        }
-
-        if (!g_vxgi_resources.IsValid())
-        {
-            g_vxgi_resources.diffuse.Create(L"vxgi.diffuse", sceneWidth, sceneHeight, 1, DXGI_FORMAT_R11G11B10_FLOAT);
-            g_vxgi_resources.specular.Create(L"vxgi.specular", sceneWidth, sceneHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
-            g_vxgi_resources.pre_clear = true;
-        }
     }
 
     void Shutdown(void)
@@ -957,7 +1007,6 @@ namespace VCT
         g_vxgi_resources.diffuse.Destroy();
         g_vxgi_resources.specular.Destroy();
         g_xFrame.Destroy();
-        g_xVoxelizer.Destroy();
     }
 
     /*
@@ -1144,7 +1193,9 @@ namespace VCT
     void VXGI_Voxelize(CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
         ModelH3D& model, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
     {
-        g_scene_gi.Update(camera);
+        EngineProfiling::BeginBlock(L"VXGI", &BaseContext);
+
+        UpdateBuffers(BaseContext, camera, model);
 
         const SceneGI::VXGI::ClipMap& clipmap = g_scene_gi.vxgi.clipmaps[g_scene_gi.vxgi.clipmap_to_update];
 
@@ -1194,19 +1245,19 @@ namespace VCT
                 EngineProfiling::EndBlock(&gfxContext);
             }
 
-            //{
-            //    EngineProfiling::BeginBlock(L"Offset Previous Voxels", &gfxContext);
-            //    ComputeContext& Context = BaseContext.GetComputeContext();
-            //    Context.SetRootSignature(m_vxgi_RootSig);
-            //    Context.SetPipelineState(m_vxgi_offsetprev_PSO);
-            //    Context.SetConstantBuffer(3, g_xFrame.GetGpuVirtualAddress());
-            //    Context.SetConstantBuffer(5, g_xVoxelizer.GetGpuVirtualAddress());
-            //    Context.SetDynamicDescriptor(7, 0, g_scene_gi.vxgi.radiance.GetSRV());
-            //    Context.SetDynamicDescriptor(8, 0, g_scene_gi.vxgi.prev_radiance.GetUAV());
-            //    uint32_t dispatchSize = g_scene_gi.vxgi.res / 8;
-            //    Context.Dispatch(dispatchSize, dispatchSize, dispatchSize);
-            //    EngineProfiling::EndBlock(&gfxContext);
-            //}
+            {
+                EngineProfiling::BeginBlock(L"Offset Previous Voxels", &gfxContext);
+                ComputeContext& Context = BaseContext.GetComputeContext();
+                Context.SetRootSignature(m_vxgi_RootSig);
+                Context.SetPipelineState(m_vxgi_offsetprev_PSO);
+                Context.SetConstantBuffer(3, g_xFrame.GetGpuVirtualAddress());
+                Context.SetDynamicConstantBufferView(5, sizeof(VoxelizerCB), &cb);
+                Context.SetDynamicDescriptor(7, 0, g_scene_gi.vxgi.radiance.GetSRV());
+                Context.SetDynamicDescriptor(8, 0, g_scene_gi.vxgi.prev_radiance.GetUAV());
+                uint32_t dispatchSize = g_scene_gi.vxgi.res / 8;
+                Context.Dispatch(dispatchSize, dispatchSize, dispatchSize);
+                EngineProfiling::EndBlock(&gfxContext);
+            }
         }
 
         /*
@@ -1309,6 +1360,8 @@ namespace VCT
             device->EventEnd(cmd);
         }
 		*/
+
+        EngineProfiling::EndBlock(&BaseContext);
     }
 
     void VXGI_Resolve(

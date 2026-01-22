@@ -43,6 +43,6 @@ namespace VCT
         CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
 
-    void Startup(Math::Camera& camera, ModelH3D& model);
+    void Startup();
     void Shutdown(void);
 } // namespace VCT
