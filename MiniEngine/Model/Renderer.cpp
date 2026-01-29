@@ -66,6 +66,7 @@ namespace Renderer
     uint32_t g_ShadowBufferID;
 
     RootSignature m_RootSig;
+    RootSignature m_VoxelRootSig;
     GraphicsPSO m_SkyboxPSO(L"Renderer: Skybox PSO");
     GraphicsPSO m_DefaultPSO(L"Renderer: Default PSO"); // Not finalized.  Used as a template.
 
@@ -95,6 +96,82 @@ void Renderer::Initialize(void)
     m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
     m_RootSig[kSkinMatrices].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
     m_RootSig.Finalize(L"RootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+    m_VoxelRootSig.Reset(6, 10);
+    m_VoxelRootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX, 0);
+    m_VoxelRootSig[2].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+    m_VoxelRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 1);
+    m_VoxelRootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_ALL, 0);
+    m_VoxelRootSig[5].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0);
+    
+    // Additional static samplers as requested
+    SamplerDesc Sampler110Desc;
+    Sampler110Desc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    Sampler110Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler110Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler110Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    m_VoxelRootSig.InitStaticSampler(100, Sampler110Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    SamplerDesc Sampler111Desc = Sampler110Desc;
+    Sampler111Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    Sampler111Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    Sampler111Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    m_VoxelRootSig.InitStaticSampler(101, Sampler111Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    SamplerDesc Sampler112Desc = Sampler110Desc;
+    Sampler112Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    Sampler112Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    Sampler112Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    m_VoxelRootSig.InitStaticSampler(102, Sampler112Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    SamplerDesc Sampler113Desc;
+    Sampler113Desc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    Sampler113Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler113Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler113Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    m_VoxelRootSig.InitStaticSampler(103, Sampler113Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    SamplerDesc Sampler114Desc = Sampler113Desc;
+    Sampler114Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    Sampler114Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    Sampler114Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    m_VoxelRootSig.InitStaticSampler(104, Sampler114Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    SamplerDesc Sampler115Desc = Sampler113Desc;
+    Sampler115Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    Sampler115Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    Sampler115Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    m_VoxelRootSig.InitStaticSampler(105, Sampler115Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    SamplerDesc Sampler116Desc;
+    Sampler116Desc.Filter = D3D12_FILTER_ANISOTROPIC;
+    Sampler116Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler116Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler116Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler116Desc.MaxAnisotropy = 16;
+    m_VoxelRootSig.InitStaticSampler(106, Sampler116Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    SamplerDesc Sampler117Desc = Sampler116Desc;
+    Sampler117Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    Sampler117Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    Sampler117Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    m_VoxelRootSig.InitStaticSampler(107, Sampler117Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    SamplerDesc Sampler118Desc = Sampler116Desc;
+    Sampler118Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    Sampler118Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    Sampler118Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    m_VoxelRootSig.InitStaticSampler(108, Sampler118Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    SamplerDesc Sampler119Desc;
+    Sampler119Desc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    Sampler119Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler119Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler119Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    Sampler119Desc.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+    m_VoxelRootSig.InitStaticSampler(109, Sampler119Desc, D3D12_SHADER_VISIBILITY_ALL);
+
+    m_VoxelRootSig.Finalize(L"VoxelRootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     DXGI_FORMAT ColorFormat = g_SceneColorBuffer.GetFormat();
     DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();

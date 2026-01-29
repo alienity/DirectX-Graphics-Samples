@@ -82,9 +82,10 @@
     <ClInclude Include="Shaders\VXGI\VXGISH_Lite.hlsli" />
     <ClInclude Include="SponzaRenderer.h" />
     <ClInclude Include="TextureConvert.h" />
-    <ClInclude Include="VoxelConeTracer.h" />
-    <ClInclude Include="VoxelConeTracing\Voxelization.h" />
-    <ClInclude Include="VoxelConeTracing\VoxelRegion.h" />
+    <ClInclude Include="VXGIRegion.h" />
+    <ClInclude Include="VXGICommon.h" />
+    <ClInclude Include="VXGIMath.h" />
+    <ClInclude Include="VXGIPrimitive.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Animation.cpp" />
@@ -99,6 +100,9 @@
     <ClCompile Include="ModelLoader.cpp" />
     <ClCompile Include="ParticleEffects.cpp" />
     <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="VXGIRegion.cpp" />
+    <ClCompile Include="VXGIMath.cpp" />
+    <ClCompile Include="VXGIPrimitive.cpp" />
     <FxCompile Include="Shaders\VXGI\VXGIOffsetprevCS.hlsl" />
     <FxCompile Include="Shaders\VXGI\VXGIVoxelizationGS.hlsl">
       <FileType>Document</FileType>
@@ -126,9 +130,6 @@
     </FxCompile>
     <ClCompile Include="SponzaRenderer.cpp" />
     <ClCompile Include="TextureConvert.cpp" />
-    <ClCompile Include="VoxelConeTracer.cpp" />
-    <ClCompile Include="VoxelConeTracing\Voxelization.cpp" />
-    <ClCompile Include="VoxelConeTracing\VoxelRegion.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

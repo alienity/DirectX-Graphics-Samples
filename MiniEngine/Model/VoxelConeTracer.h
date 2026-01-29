@@ -34,8 +34,10 @@ namespace VCT
         bool IsValid() const { return diffuse.GetResource() != nullptr; }
     };
 
-    void RefreshEnvProbes(CommandContext& BaseContext, const Math::Camera& camera);
-    
+    ByteAddressBuffer& GetVoxelBuffer();
+    ByteAddressBuffer& GetFrameBuffer();
+    ByteAddressBuffer& GetCameraBuffer();
+
     void VXGI_Voxelize(CommandContext& BaseContext, const Math::Camera& camera, const ShadowCamera& shadowCamera,
                        ModelH3D& model, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
     // Resolve VXGI to screen

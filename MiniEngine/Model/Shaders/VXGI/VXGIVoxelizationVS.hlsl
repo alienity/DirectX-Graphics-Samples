@@ -1,28 +1,26 @@
 #include "VXGIRenderer.hlsli"
 
-struct InstanceCB
+cbuffer VSConstants : register(b0)
 {
     float4x4 modelMatrix;
     float4x4 modelMatrixIT;
     int cameraIndex;
-    int3 _pad0;
+    int3 Pad0;
 };
-
-ConstantBuffer<InstanceCB> g_xInstance : register(b999);
 
 float4x4 getModelMatrix()
 {
-    return g_xInstance.modelMatrix;
+    return modelMatrix;
 }
 
 float4x4 getModelMatrixIT()
 {
-    return g_xInstance.modelMatrixIT;
+    return modelMatrixIT;
 }
 
 int getCameraIndex()
 {
-    return g_xInstance.cameraIndex;
+    return cameraIndex;
 }
 
 struct VSInput
@@ -39,9 +37,11 @@ struct VSOutput
     float4 pos : SV_Position;
     float2 uv : TexCoord0;
     float3 N : Normal;
+    /*
 #ifndef VOXELIZATION_GEOMETRY_SHADER_ENABLED
     float3 P : POSITION3D;
 #endif // VOXELIZATION_GEOMETRY_SHADER_ENABLED
+    */
 };
 
 [RootSignature(Voxel_RootSig)]
@@ -52,7 +52,7 @@ VSOutput main(VSInput input)
     Out.pos = mul(getModelMatrix(), float4(input.pos, 1.0f));
     Out.uv = input.texcoord0;
     Out.N = mul(getModelMatrixIT(), float4(input.normal, 0.0f)).xyz;
-
+    /*
 #ifndef VOXELIZATION_GEOMETRY_SHADER_ENABLED
     Out.P = Out.pos.xyz;
     
@@ -95,6 +95,6 @@ VSOutput main(VSInput input)
     Out.pos.xy *= g_xFrame.vxgi.resolution_rcp;
     Out.pos.zw = 1;
 #endif
-    
+    */
     return Out;
 }

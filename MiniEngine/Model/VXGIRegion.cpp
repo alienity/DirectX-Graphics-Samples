@@ -1,8 +1,8 @@
-#include "VoxelRegion.h"
+#include "VXGIRegion.h"
 
 using namespace Math;
 
-namespace VCT
+namespace VXGI
 {
     Math::Vector3 VoxelRegion::getMinPosImage(const Math::Vector3& imageSize) const
     {

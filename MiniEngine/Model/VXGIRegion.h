@@ -5,7 +5,7 @@
 #include "../Core/Math/BoundingBox.h"
 #include <vector>
 
-namespace VCT
+namespace VXGI
 {
     struct VoxelRegion
     {
@@ -71,4 +71,4 @@ namespace VCT
 
         // Note: the voxel size in local voxel coordinates is always 1
     };
-} // namespace VCT
+} // namespace VXGI

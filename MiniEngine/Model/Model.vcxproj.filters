@@ -43,13 +43,15 @@
     <ClCompile Include="Animation.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="VoxelConeTracer.cpp">
+    <ClCompile Include="VXGIRegion.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="VoxelConeTracing\VoxelRegion.cpp">
+    <ClCompile Include="VXGIMath.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="VoxelConeTracing\Voxelization.cpp" />
+    <ClCompile Include="VXGIPrimitive.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -67,9 +69,6 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="Renderer.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="TextureConvert.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="json.hpp">
@@ -105,13 +104,6 @@
     <ClInclude Include="Animation.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="VoxelConeTracer.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="VoxelConeTracing\VoxelRegion.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="VoxelConeTracing\Voxelization.h" />
     <ClInclude Include="Shaders\VXGI\VoxelConeTracing.hlsli">
       <Filter>Shaders\VoxelConeTracing</Filter>
     </ClInclude>
@@ -138,6 +130,21 @@
     </ClInclude>
     <ClInclude Include="Shaders\VXGI\VXGISH_Lite.hlsli">
       <Filter>Shaders\VoxelConeTracing</Filter>
+    </ClInclude>
+    <ClInclude Include="TextureConvert.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VXGIRegion.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VXGICommon.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VXGIMath.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VXGIPrimitive.h">
+      <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

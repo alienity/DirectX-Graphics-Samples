@@ -145,18 +145,11 @@ CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
 
 #define Voxel_RootSig \
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
-	"RootConstants(num32BitConstants=12, b999), " \
-	"CBV(b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL), " \
-	"CBV(b1, space = 0, visibility = SHADER_VISIBILITY_PIXEL), " \
-	"CBV(b0, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
-	"CBV(b1, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
-	"CBV(b2, space = 1, visibility = SHADER_VISIBILITY_ALL), " \
-    "DescriptorTable(CBV(b3, space = 1, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL)," \
-    "DescriptorTable(SRV(t0, numDescriptors = 20), visibility = SHADER_VISIBILITY_ALL)," \
-    "DescriptorTable(UAV(u0, numDescriptors = 10), visibility = SHADER_VISIBILITY_ALL)," \
-    "StaticSampler(s10, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)," \
-    "StaticSampler(s11, visibility = SHADER_VISIBILITY_PIXEL, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, comparisonFunc = COMPARISON_GREATER_EQUAL, filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
-    "StaticSampler(s12, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL), " \
+    "CBV(b0, space = 0, visibility = SHADER_VISIBILITY_VERTEX), " \
+    "CBV(b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL), " \
+	"DescriptorTable(CBV(b0, numDescriptors = 10, space = 1), visibility = SHADER_VISIBILITY_ALL)," \
+    "DescriptorTable(SRV(t0, numDescriptors = 20, space = 0), visibility = SHADER_VISIBILITY_ALL)," \
+	"DescriptorTable(UAV(u0, numDescriptors = 10, space = 0), visibility = SHADER_VISIBILITY_ALL)," \
     "StaticSampler(s100, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
     "StaticSampler(s101, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
     "StaticSampler(s102, addressU = TEXTURE_ADDRESS_MIRROR, addressV = TEXTURE_ADDRESS_MIRROR, addressW = TEXTURE_ADDRESS_MIRROR, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
@@ -166,7 +159,6 @@ CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
     "StaticSampler(s106, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_ANISOTROPIC, maxAnisotropy = 16)," \
     "StaticSampler(s107, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_ANISOTROPIC, maxAnisotropy = 16)," \
     "StaticSampler(s108, addressU = TEXTURE_ADDRESS_MIRROR, addressV = TEXTURE_ADDRESS_MIRROR, addressW = TEXTURE_ADDRESS_MIRROR, filter = FILTER_ANISOTROPIC, maxAnisotropy = 16)," \
-    "StaticSampler(s109, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, comparisonFunc = COMPARISON_GREATER_EQUAL),"
-
+    "StaticSampler(s109, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, comparisonFunc = COMPARISON_GREATER_EQUAL)," \
 
 #endif
