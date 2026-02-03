@@ -1202,27 +1202,27 @@ static const half BayerMatrix8[8][8] =
 };
 
 
-inline half ditherMask2(in min16uint2 pixel)
+inline half ditherMask2(in uint2 pixel)
 {
     return BayerMatrix2[pixel.x % 2][pixel.y % 2];
 }
 
-inline half ditherMask3(in min16uint2 pixel)
+inline half ditherMask3(in uint2 pixel)
 {
     return BayerMatrix3[pixel.x % 3][pixel.y % 3];
 }
 
-inline half ditherMask4(in min16uint2 pixel)
+inline half ditherMask4(in uint2 pixel)
 {
     return BayerMatrix4[pixel.x % 4][pixel.y % 4];
 }
 
-inline half ditherMask8(in min16uint2 pixel)
+inline half ditherMask8(in uint2 pixel)
 {
     return BayerMatrix8[pixel.x % 8][pixel.y % 8];
 }
 
-inline half dither(in min16uint2 pixel)
+inline half dither(in uint2 pixel)
 {
     return ditherMask8(pixel);
 }
@@ -1239,11 +1239,11 @@ static const half2 BayerMatrix8_sincos[8][8] =
     { half2(0.873968, 0.485983), half2(-0.548012, 0.836470), half2(0.626185, 0.779674), half2(-0.822984, 0.568065), half2(0.822984, 0.568065), half2(-0.626185, 0.779675), half2(0.548013, 0.836470), half2(-0.873968, 0.485984), },
     { half2(-0.849468, -0.527640), half2(0.506960, -0.861970), half2(-0.587786, -0.809017), half2(0.794578, -0.607163), half2(-0.794578, -0.607162), half2(0.587785, -0.809017), half2(-0.506960, -0.861970), half2(0.849468, -0.527640), },
 };
-inline half2 dither_sincos(in min16uint2 pixel)
+inline half2 dither_sincos(in uint2 pixel)
 {
     return BayerMatrix8_sincos[pixel.x % 8][pixel.y % 8];
 }
-inline half2x2 dither_rot2x2(in min16uint2 pixel)
+inline half2x2 dither_rot2x2(in uint2 pixel)
 {
     half2 sincos = dither_sincos(pixel);
     return half2x2(
@@ -1659,7 +1659,7 @@ class ColorSpace
 };
 
 
-static const min16uint NUM_PARALLAX_OCCLUSION_STEPS = 32;
+static const uint NUM_PARALLAX_OCCLUSION_STEPS = 32;
 static const half NUM_PARALLAX_OCCLUSION_STEPS_RCP = 1.0 / NUM_PARALLAX_OCCLUSION_STEPS;
 inline void ParallaxOcclusionMapping_Impl(
 	inout float4 uvsets, // uvsets to modify
@@ -1685,7 +1685,7 @@ inline void ParallaxOcclusionMapping_Impl(
     half2 dtex = strength * V.xy * NUM_PARALLAX_OCCLUSION_STEPS_RCP;
     float2 currentTextureCoords = uv;
     half heightFromTexture = 1 - tex.SampleGrad(sam, currentTextureCoords, uv_dx, uv_dy).r;
-    min16uint iter = 0;
+    uint iter = 0;
 	[loop]
     while (heightFromTexture > curLayerHeight && iter < NUM_PARALLAX_OCCLUSION_STEPS)
     {

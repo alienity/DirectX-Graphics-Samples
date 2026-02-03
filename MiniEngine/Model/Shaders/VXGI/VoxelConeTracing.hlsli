@@ -149,7 +149,7 @@ inline float4 ConeTraceDiffuse(in Texture3D<float4> voxels, in Texture3D<float> 
 	return amount;
 }
 
-inline min16uint2 GetTemporalAASampleRotation()
+inline uint2 GetTemporalAASampleRotation()
 {
     return uint2(g_xFrame.temporalaa_samplerotation & 0xFF, (g_xFrame.temporalaa_samplerotation >> 8u) & 0xFF);
 }

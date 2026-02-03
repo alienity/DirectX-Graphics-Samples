@@ -28,6 +28,9 @@ namespace Graphics
     ColorBuffer g_OverlayBuffer;
     ColorBuffer g_HorizontalBuffer;
 
+    ColorBuffer g_VXGIDiffuse;
+    ColorBuffer g_VXGISpecular;
+
     ShadowBuffer g_ShadowBuffer;
 
     ColorBuffer g_SSAOFullScreen(Color(1.0f, 1.0f, 1.0f));
@@ -128,6 +131,9 @@ void Graphics::InitializeRenderingBuffers( uint32_t bufferWidth, uint32_t buffer
             esram.PushStack(); // Begin opaque geometry
 
                 esram.PushStack();    // Begin Shading
+
+                    g_VXGIDiffuse.Create( L"VXGI Diffuse", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+                    g_VXGISpecular.Create( L"VXGI Specular", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
 
                     g_SSAOFullScreen.Create( L"SSAO Full Res", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R8_UNORM );
 
@@ -252,6 +258,9 @@ void Graphics::DestroyRenderingBuffers()
     g_PostEffectsBuffer.Destroy();
 
     g_ShadowBuffer.Destroy();
+
+    g_VXGIDiffuse.Destroy();
+    g_VXGISpecular.Destroy();
 
     g_SSAOFullScreen.Destroy();
     g_LinearDepth[0].Destroy();

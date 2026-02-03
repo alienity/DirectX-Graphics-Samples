@@ -64,14 +64,14 @@ struct ShaderFrustumCorners
 
     inline float3 screen_to_nearplane(float2 uv)
     {
-        float3 posTOP = lerp(cornersNEAR[0], cornersNEAR[1], uv.x);
-        float3 posBOTTOM = lerp(cornersNEAR[2], cornersNEAR[3], uv.x);
+        float3 posTOP = lerp(cornersNEAR[0], cornersNEAR[1], uv.x).xyz;
+        float3 posBOTTOM = lerp(cornersNEAR[2], cornersNEAR[3], uv.x).xyz;
         return lerp(posTOP, posBOTTOM, uv.y);
     }
     inline float3 screen_to_farplane(float2 uv)
     {
-        float3 posTOP = lerp(cornersFAR[0], cornersFAR[1], uv.x);
-        float3 posBOTTOM = lerp(cornersFAR[2], cornersFAR[3], uv.x);
+        float3 posTOP = lerp(cornersFAR[0], cornersFAR[1], uv.x).xyz;
+        float3 posBOTTOM = lerp(cornersFAR[2], cornersFAR[3], uv.x).xyz;
         return lerp(posTOP, posBOTTOM, uv.y);
     }
     inline float3 screen_to_world(float2 uv, float lineardepthNormalized)
@@ -145,6 +145,7 @@ CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
 
 #define Voxel_RootSig \
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
+    "RootConstants(num32BitConstants=12, b999), " \
     "CBV(b0, space = 0, visibility = SHADER_VISIBILITY_VERTEX), " \
     "CBV(b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL), " \
 	"DescriptorTable(CBV(b0, numDescriptors = 10, space = 1), visibility = SHADER_VISIBILITY_ALL)," \

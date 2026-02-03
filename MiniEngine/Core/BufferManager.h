@@ -16,6 +16,7 @@
 #include "ColorBuffer.h"
 #include "DepthBuffer.h"
 #include "ShadowBuffer.h"
+#include "VolumeBuffer.h"
 #include "GpuBuffer.h"
 #include "GraphicsCore.h"
 
@@ -27,6 +28,9 @@ namespace Graphics
     extern ColorBuffer g_PostEffectsBuffer; // R32_UINT (to support Read-Modify-Write with a UAV)
     extern ColorBuffer g_OverlayBuffer;     // R8G8B8A8_UNORM
     extern ColorBuffer g_HorizontalBuffer;  // For separable (bicubic) upsampling
+
+    extern ColorBuffer g_VXGIDiffuse;
+    extern ColorBuffer g_VXGISpecular;
 
     extern ColorBuffer g_VelocityBuffer;    // R10G10B10  (3D velocity)
     extern ShadowBuffer g_ShadowBuffer;
@@ -80,6 +84,10 @@ namespace Graphics
     extern ByteAddressBuffer g_Histogram;
     extern ByteAddressBuffer g_FXAAWorkQueue;
     extern TypedBuffer g_FXAAColorQueue;
+
+    extern ByteAddressBuffer g_xVoxelizer;
+    extern ByteAddressBuffer g_xFrame;
+    extern ByteAddressBuffer m_xCamera;
 
     void InitializeRenderingBuffers(uint32_t NativeWidth, uint32_t NativeHeight );
     void ResizeDisplayDependentBuffers(uint32_t NativeWidth, uint32_t NativeHeight);

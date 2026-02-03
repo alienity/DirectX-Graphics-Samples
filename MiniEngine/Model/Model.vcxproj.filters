@@ -46,12 +46,6 @@
     <ClCompile Include="VXGIRegion.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="VXGIMath.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="VXGIPrimitive.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -135,15 +129,6 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="VXGIRegion.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="VXGICommon.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="VXGIMath.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="VXGIPrimitive.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

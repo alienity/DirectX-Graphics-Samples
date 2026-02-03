@@ -83,9 +83,6 @@
     <ClInclude Include="SponzaRenderer.h" />
     <ClInclude Include="TextureConvert.h" />
     <ClInclude Include="VXGIRegion.h" />
-    <ClInclude Include="VXGICommon.h" />
-    <ClInclude Include="VXGIMath.h" />
-    <ClInclude Include="VXGIPrimitive.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Animation.cpp" />
@@ -101,8 +98,6 @@
     <ClCompile Include="ParticleEffects.cpp" />
     <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="VXGIRegion.cpp" />
-    <ClCompile Include="VXGIMath.cpp" />
-    <ClCompile Include="VXGIPrimitive.cpp" />
     <FxCompile Include="Shaders\VXGI\VXGIOffsetprevCS.hlsl" />
     <FxCompile Include="Shaders\VXGI\VXGIVoxelizationGS.hlsl">
       <FileType>Document</FileType>

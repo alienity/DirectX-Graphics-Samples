@@ -105,6 +105,9 @@
     <ClInclude Include="Math\Scalar.h" />
     <ClInclude Include="Math\Transform.h" />
     <ClInclude Include="Math\Vector.h" />
+    <ClInclude Include="Math\XCommon.h" />
+    <ClInclude Include="Math\XMath.h" />
+    <ClInclude Include="Math\XPrimitive.h" />
     <ClInclude Include="MotionBlur.h" />
     <ClInclude Include="ParticleEffect.h" />
     <ClInclude Include="ParticleEffectManager.h" />
@@ -166,6 +169,8 @@
     <ClCompile Include="Math\BoundingSphere.cpp" />
     <ClCompile Include="Math\Frustum.cpp" />
     <ClCompile Include="Math\Random.cpp" />
+    <ClCompile Include="Math\XMath.cpp" />
+    <ClCompile Include="Math\XPrimitive.cpp" />
     <ClCompile Include="MotionBlur.cpp" />
     <ClCompile Include="ParticleEffect.cpp" />
     <ClCompile Include="ParticleEffectManager.cpp" />

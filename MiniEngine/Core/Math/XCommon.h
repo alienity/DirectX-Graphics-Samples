@@ -1,15 +1,15 @@
 #pragma once
-#include "pch.h"
-#include <DirectXMesh.h>
+
+#include <DirectXMath.h>
+#include <intrin.h>
 #include <DirectXPackedVector.h>
 #include <DirectXCollision.h>
 #include <algorithm>
 #include <limits>
 #include <type_traits>
 #include <cmath>
-#include <intrin.h>
 
-namespace VXGI
+namespace Math
 {
 #define arraysize(a) (sizeof(a) / sizeof(a[0]))
 
@@ -85,7 +85,7 @@ namespace VXGI
         char chars[capacity] = {};
         unsigned cnt = 0;
         static_assert(capacity > 1);
-        constexpr operator const char*() const { return chars; }
+        constexpr operator const char* () const { return chars; }
         constexpr const char* const c_str() const { return chars; }
 
         constexpr void push_back(const char* str)
@@ -331,4 +331,5 @@ namespace VXGI
         ret.push_back(str);
         return ret;
     }
-} // namespace VXGI
+
+}
