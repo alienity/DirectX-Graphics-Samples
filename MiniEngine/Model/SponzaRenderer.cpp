@@ -77,11 +77,6 @@ namespace VXGI
         float stepsize; // raymarch step size in voxel space units
         float max_distance; // maximum raymarch distance for voxel GI in world-space
 
-        //int texture_radiance;
-        //int texture_sdf;
-        //int padding0;
-        //int padding1;
-
         VoxelClipMap clipmaps[VXGI_CLIPMAP_COUNT];
     };
 
@@ -399,15 +394,15 @@ namespace VXGI
         {
             if (vxgi.m_xVoxelizer.GetResource() == nullptr)
             {
-                vxgi.m_xVoxelizer.Create(L"g_xVoxelizerCPU", 1, sizeof(VoxelizerCB));
+                vxgi.m_xVoxelizer = ByteAddressBuffer::CreateCBVReady(L"g_xVoxelizerCPU", Math::AlignUp(sizeof(VoxelizerCB), 256), nullptr);
             }
             if (m_xFrame.GetResource() == nullptr)
             {
-                m_xFrame.Create(L"g_xFrame", 1, sizeof(FrameCB));
+                m_xFrame = ByteAddressBuffer::CreateCBVReady(L"g_xFrame", Math::AlignUp(sizeof(FrameCB), 256), nullptr);
             }
             if (m_xCamera.GetResource() == nullptr)
             {
-                m_xCamera.Create(L"g_xCamera", 1, sizeof(CameraCB));
+                m_xCamera = ByteAddressBuffer::CreateCBVReady(L"g_xCamera", Math::AlignUp(sizeof(CameraCB), 256), nullptr);
             }
 
             if (vxgi.radiance.GetResource() == nullptr)
@@ -459,7 +454,7 @@ namespace VXGI
                 cb.clipmap_index = vxgi.clipmap_to_update;
 
                 context.WriteBuffer(vxgi.m_xVoxelizer, 0, &cb, sizeof(cb));
-                context.TransitionResource(vxgi.m_xVoxelizer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.TransitionResource(vxgi.m_xVoxelizer, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
             }
 
             // Update frame constant buffer
@@ -488,7 +483,7 @@ namespace VXGI
                 }
 
                 context.WriteBuffer(m_xFrame, 0, &cb, sizeof(cb));
-                context.TransitionResource(m_xFrame, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.TransitionResource(m_xFrame, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
             }
 
             // Update camera constant buffer
@@ -501,13 +496,11 @@ namespace VXGI
 
                 ShaderFrustumCorners frustum_corners;
 
-                // 设置近平面的四个角点
                 XMStoreFloat4(&frustum_corners.cornersNEAR[0], XMVector3TransformCoord(XMVectorSet(-1, 1, 1, 1), invVP)); // near topleft
                 XMStoreFloat4(&frustum_corners.cornersNEAR[1], XMVector3TransformCoord(XMVectorSet(1, 1, 1, 1), invVP));  // near topright
                 XMStoreFloat4(&frustum_corners.cornersNEAR[2], XMVector3TransformCoord(XMVectorSet(-1, -1, 1, 1), invVP)); // near bottomleft
                 XMStoreFloat4(&frustum_corners.cornersNEAR[3], XMVector3TransformCoord(XMVectorSet(1, -1, 1, 1), invVP));  // near bottomright
 
-                // 设置远平面的四个角点
                 XMStoreFloat4(&frustum_corners.cornersFAR[0], XMVector3TransformCoord(XMVectorSet(-1, 1, 0, 1), invVP)); // far topleft
                 XMStoreFloat4(&frustum_corners.cornersFAR[1], XMVector3TransformCoord(XMVectorSet(1, 1, 0, 1), invVP));  // far topright
                 XMStoreFloat4(&frustum_corners.cornersFAR[2], XMVector3TransformCoord(XMVectorSet(-1, -1, 0, 1), invVP)); // far bottomleft
@@ -515,7 +508,6 @@ namespace VXGI
 
                 XMFLOAT4 frustumPlanes[6];
 
-                // 从视图投影矩阵提取视锥体平面
                 XMFLOAT4X4 vp;
                 XMStoreFloat4x4(&vp, viewProjection);
 
@@ -561,7 +553,6 @@ namespace VXGI
                     vp._34 - vp._33,
                     vp._44 - vp._43);
 
-                // 归一化所有平面
                 for (int i = 0; i < 6; i++) {
                     XMVECTOR planeVec = XMLoadFloat4(&frustumPlanes[i]);
                     planeVec = XMPlaneNormalize(planeVec);
@@ -571,14 +562,12 @@ namespace VXGI
                 ShaderCamera scamera;
                 XMStoreFloat4x4(&scamera.inverse_view_projection, invVP);
 
-                // 将提取的平面复制到scamera的frustum
                 for (int i = 0; i < 6; i++) {
                     scamera.frustum.planes[i] = frustumPlanes[i];
                 }
 
                 scamera.frustum_corners = frustum_corners;
 
-                // 填充相机的其他属性
                 XMStoreFloat4x4(&scamera.view_projection, viewProjection);
 
                 XMVECTOR camPos = camera.GetPosition();
@@ -607,15 +596,15 @@ namespace VXGI
                 XMStoreFloat4x4(&scamera.inverse_view, invView);
                 XMStoreFloat4x4(&scamera.inverse_projection, invProj);
 
-                scamera.clip_plane = XMFLOAT4(0, 0, 0, 0); // 默认值
-                scamera.reflection_plane = XMFLOAT4(0, 0, 0, 0); // 默认值
+                scamera.clip_plane = XMFLOAT4(0, 0, 0, 0); // 默锟斤拷值
+                scamera.reflection_plane = XMFLOAT4(0, 0, 0, 0); // 默锟斤拷值
                 scamera.temporalaa_jitter = XMFLOAT2(0, 0);
                 scamera.temporalaa_jitter_prev = XMFLOAT2(0, 0);
 
                 XMMATRIX prevViewProj = camera.GetPreviousViewProjMatrix();
                 XMStoreFloat4x4(&scamera.previous_view_projection, prevViewProj);
-                XMMATRIX tempView = camera.GetViewMatrix(); // 使用当前视图矩阵作为近似值
-                XMMATRIX tempProj = camera.GetProjMatrix(); // 使用当前投影矩阵作为近似值
+                XMMATRIX tempView = camera.GetViewMatrix();
+                XMMATRIX tempProj = camera.GetProjMatrix();
                 XMMATRIX tempInvPrevVP = XMMatrixInverse(nullptr, prevViewProj);
                 XMStoreFloat4x4(&scamera.previous_view, tempView);
                 XMStoreFloat4x4(&scamera.previous_projection, tempProj);
@@ -629,8 +618,6 @@ namespace VXGI
                 scamera.aperture_size = 0.0f;
                 scamera.focal_length = 1.0f;
 
-                // 从模型获取缓冲区尺寸信息，如果可能的话
-                // 如果不能获取，使用默认值
                 uint32_t width = g_SceneColorBuffer.GetWidth();
                 uint32_t height = g_SceneColorBuffer.GetHeight();
 
@@ -648,8 +635,10 @@ namespace VXGI
                 cb.cameras[0] = scamera;
 
                 context.WriteBuffer(m_xCamera, 0, &cb, sizeof(cb));
-                context.TransitionResource(m_xCamera, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.TransitionResource(m_xCamera, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
             }
+
+            context.Flush();
         }
     };
 }
@@ -661,7 +650,6 @@ namespace Sponza
     enum eObjectFilter { kOpaque = 0x1, kCutout = 0x2, kTransparent = 0x4, kAll = 0xF, kNone = 0x0 };
     void RenderObjects( GraphicsContext& Context, const Matrix4& ViewProjMat, const Vector3& viewerPos, eObjectFilter Filter = kAll );
 
-    void VXGIVoxelize(GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
     void VXGIResolve(GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
     void VoxelizeObjects( GraphicsContext& Context, const Matrix4& ViewProjMat, const Vector3& viewerPos, eObjectFilter Filter = kAll );
 
@@ -852,95 +840,6 @@ void Sponza::RenderObjects( GraphicsContext& gfxContext, const Matrix4& ViewProj
     }
 }
 
-void Sponza::VXGIVoxelize(GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
-{
-    gfxContext.SetRootSignature(Renderer::m_VoxelRootSig);
-    gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
-    gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    gfxContext.SetIndexBuffer(m_Scene.m_Model.GetIndexBuffer());
-    gfxContext.SetVertexBuffer(0, m_Scene.m_Model.GetVertexBuffer());
-
-    ScopedTimer _prof(L"VoxelPass", gfxContext);
-
-    __declspec(align(16)) struct VSConstants
-    {
-        XMFLOAT4X4 modelMatrix;
-        XMFLOAT4X4 modelMatrixIT;
-        int cameraIndex;
-    } vsConstants;
-    // For VXGI voxelization, we typically use identity matrix for static models like Sponza
-    vsConstants.modelMatrix = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f };
-    vsConstants.modelMatrixIT = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f };
-    vsConstants.cameraIndex = 0;
-
-    gfxContext.SetDynamicConstantBufferView(1, sizeof(vsConstants), &vsConstants);
-
-    uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
-
-    __declspec(align(16)) struct PSConstants
-    {
-        Vector3 SunDirection;
-        Vector3 SunColor;
-        Vector3 AmbientColor;
-        float ShadowTexelSize[4];
-        float InvTileDim[4];
-        uint32_t TileCount[4];
-        uint32_t FirstLightIndex[4];
-        uint32_t FrameIndexMod2;
-        Matrix4 modelToShadow;
-        XMFLOAT3 viewerPos;
-    } psConstants;
-
-    psConstants.SunDirection = m_Scene.m_SunDirection;
-    psConstants.SunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
-    psConstants.AmbientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
-    psConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
-    psConstants.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
-    psConstants.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
-    psConstants.TileCount[0] = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
-    psConstants.TileCount[1] = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
-    psConstants.FirstLightIndex[0] = Lighting::m_FirstConeLight;
-    psConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
-    psConstants.FrameIndexMod2 = FrameIndex;
-    psConstants.modelToShadow = m_Scene.m_SunShadow.GetShadowMatrix();
-    XMStoreFloat3(&psConstants.viewerPos, camera.GetPosition());
-
-    gfxContext.SetDynamicConstantBufferView(2, sizeof(psConstants), &psConstants);
-
-    gfxContext.SetDynamicDescriptor(3, 0, m_Scene.m_xFrame.GetSRV());
-    gfxContext.SetDynamicDescriptor(3, 1, m_Scene.m_xCamera.GetSRV());
-    gfxContext.SetDynamicDescriptor(3, 2, m_Scene.vxgi.m_xVoxelizer.GetSRV());
-
-    gfxContext.SetDynamicDescriptor(5, 0, m_Scene.vxgi.render_atomic.GetUAV());
-
-    {
-        ScopedTimer _prof2(L"OpaqueVoxel", gfxContext);
-        {
-            gfxContext.SetPipelineState(m_VoxelPSO);
-            gfxContext.SetViewportAndScissor(viewport, scissor);
-        }
-        VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kOpaque);
-    }
-
-    {
-        ScopedTimer _prof2(L"CutoutVoxel", gfxContext);
-        {
-            gfxContext.SetPipelineState(m_CutoutVoxelPSO);
-            gfxContext.SetViewportAndScissor(viewport, scissor);
-        }
-        VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kCutout);
-    }
-
-}
-
 void Sponza::VXGIResolve(GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
 {
 
@@ -1024,10 +923,6 @@ void Sponza::RenderScene(
     float cosphi = cosf(m_SunInclination * 3.14159f * 0.5f);
     float sinphi = sinf(m_SunInclination * 3.14159f * 0.5f);
     m_Scene.m_SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
-
-    // Voxelization
-    VXGIVoxelize(gfxContext, camera, viewport, scissor);
-    VXGIResolve(gfxContext, camera, viewport, scissor);
 
     __declspec(align(16)) struct
     {
@@ -1133,6 +1028,8 @@ void Sponza::RenderScene(
         }
     }
 
+    pfnSetupGraphicsState();
+
     if (!skipDiffusePass)
     {
         if (!SSAO::DebugDraw)
@@ -1168,4 +1065,113 @@ void Sponza::RenderScene(
             }
         }
     }
+
+
+    {
+        D3D12_VIEWPORT m_VoxelViewport;
+        m_VoxelViewport.Width = (float)m_Scene.vxgi.res;
+        m_VoxelViewport.Height = (float)m_Scene.vxgi.res;
+        m_VoxelViewport.MinDepth = 0.0f;
+        m_VoxelViewport.MaxDepth = 1.0f;
+
+        D3D12_RECT m_VoxelScissor;
+        m_VoxelScissor.left = 0;
+        m_VoxelScissor.top = 0;
+        m_VoxelScissor.right = (LONG)m_Scene.vxgi.res;
+        m_VoxelScissor.bottom = (LONG)m_Scene.vxgi.res;
+
+        __declspec(align(16)) struct VSConstants
+        {
+            XMFLOAT4X4 modelMatrix;
+            XMFLOAT4X4 modelMatrixIT;
+            int cameraIndex;
+        } mVSConstants;
+        // For VXGI voxelization, we typically use identity matrix for static models like Sponza
+        mVSConstants.modelMatrix = {
+            1.0f, 0.0f, 0.0f, 0.0f,
+            0.0f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f };
+        mVSConstants.modelMatrixIT = {
+            1.0f, 0.0f, 0.0f, 0.0f,
+            0.0f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f };
+        mVSConstants.cameraIndex = 0;
+
+        uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
+
+        __declspec(align(16)) struct PSConstants
+        {
+            Vector3 SunDirection;
+            Vector3 SunColor;
+            Vector3 AmbientColor;
+            float ShadowTexelSize[4];
+            float InvTileDim[4];
+            uint32_t TileCount[4];
+            uint32_t FirstLightIndex[4];
+            uint32_t FrameIndexMod2;
+            Matrix4 modelToShadow;
+            XMFLOAT3 viewerPos;
+        } mPSConstants;
+
+        mPSConstants.SunDirection = m_Scene.m_SunDirection;
+        mPSConstants.SunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
+        mPSConstants.AmbientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
+        mPSConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
+        mPSConstants.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
+        mPSConstants.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
+        mPSConstants.TileCount[0] = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
+        mPSConstants.TileCount[1] = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
+        mPSConstants.FirstLightIndex[0] = Lighting::m_FirstConeLight;
+        mPSConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
+        mPSConstants.FrameIndexMod2 = FrameIndex;
+        mPSConstants.modelToShadow = m_Scene.m_SunShadow.GetShadowMatrix();
+        XMStoreFloat3(&mPSConstants.viewerPos, camera.GetPosition());
+
+        gfxContext.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+        gfxContext.SetRootSignature(Renderer::m_VoxelRootSig);
+        gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
+        gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        gfxContext.SetIndexBuffer(m_Scene.m_Model.GetIndexBuffer());
+        gfxContext.SetVertexBuffer(0, m_Scene.m_Model.GetVertexBuffer());
+
+        ScopedTimer _prof(L"VoxelPass", gfxContext);
+
+        gfxContext.SetDynamicConstantBufferView(1, sizeof(mVSConstants), &mVSConstants);
+        gfxContext.SetDynamicConstantBufferView(2, sizeof(mPSConstants), &mPSConstants);
+
+        gfxContext.SetDynamicDescriptor(3, 0, m_Scene.m_xFrame.GetCBV());
+        gfxContext.SetDynamicDescriptor(3, 1, m_Scene.m_xCamera.GetCBV());
+        gfxContext.SetDynamicDescriptor(3, 2, m_Scene.vxgi.m_xVoxelizer.GetCBV());
+
+        gfxContext.SetDescriptorTable(5, Renderer::m_CommonTextures);
+
+        gfxContext.SetDynamicDescriptor(6, 0, m_Scene.vxgi.render_atomic.GetUAV());
+
+        {
+            ScopedTimer _prof2(L"OpaqueVoxel", gfxContext);
+            {
+                gfxContext.SetPipelineState(m_VoxelPSO);
+                gfxContext.SetRenderTargets(0, nullptr);
+                gfxContext.SetViewportAndScissor(m_VoxelViewport, m_VoxelScissor);
+            }
+            VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kOpaque);
+        }
+
+        {
+            ScopedTimer _prof2(L"CutoutVoxel", gfxContext);
+            {
+                gfxContext.SetPipelineState(m_CutoutVoxelPSO);
+                gfxContext.SetRenderTargets(0, nullptr);
+                gfxContext.SetViewportAndScissor(m_VoxelViewport, m_VoxelScissor);
+            }
+            VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kCutout);
+        }
+
+
+        VXGIResolve(gfxContext, camera, m_VoxelViewport, m_VoxelScissor);
+    };
+
 }

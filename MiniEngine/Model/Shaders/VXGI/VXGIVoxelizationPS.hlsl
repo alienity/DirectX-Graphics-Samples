@@ -28,10 +28,10 @@ ConstantBuffer<CameraCB> g_xCamera : register(b2, space1);
 // CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
 // CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
 
-Texture2D<float3> texBaseColor : register(t0);
+Texture2D<float3> texDiffuse : register(t0);
 Texture2D<float3> texSpecular : register(t1);
-Texture2D<float4> texEmissive : register(t2);
-Texture2D<float3> texNormal : register(t3);
+//Texture2D<float4> texEmissive		: register(t2);
+//Texture2D<float3> texNormal : register(t3);
 //Texture2D<float4> texLightmap		: register(t4);
 //Texture2D<float4> texReflection	: register(t5);
 Texture2D<float> texSSAO : register(t12);
@@ -42,7 +42,7 @@ Texture2DArray<float> lightShadowArrayTex : register(t15);
 ByteAddressBuffer lightGrid : register(t16);
 ByteAddressBuffer lightGridBitMask : register(t17);
 
-Texture3D<float4> input_previous_radiance : register(t18);
+//Texture3D<float4> input_previous_radiance : register(t18);
 
 RWTexture3D<uint> output_atomic : register(u0);
 
@@ -766,22 +766,22 @@ void main(PSInput input)
 	
     float4 baseColor = float4(1, 1, 1, 1);
     float lod_bias = 0;
-    baseColor *= float4(texBaseColor.SampleBias(sampler_linear_clamp, uvset, lod_bias).rgb, 1.0f);
+    baseColor *= float4(texDiffuse.SampleBias(sampler_linear_clamp, uvset, lod_bias).rgb, 1.0f);
 
     float3 emissiveColor = float3(0, 0, 0);
-    float4 emissiveMap = texEmissive.Sample(sampler_linear_clamp, uvset);
-    emissiveColor *= emissiveMap.rgb * emissiveMap.a;
+    //float4 emissiveMap = texEmissive.Sample(sampler_linear_clamp, uvset);
+    //emissiveColor *= emissiveMap.rgb * emissiveMap.a;
 
     float3 N = normalize(input.N);
 
     uint2 pixelPos = uint2(input.pos.xy);
-    float3 diffuseAlbedo = texBaseColor.Sample(sampler_linear_clamp, uvset);
+    float3 diffuseAlbedo = texDiffuse.Sample(sampler_linear_clamp, uvset);
     float3 colorSum = 0;
     {
         float ao = texSSAO[pixelPos];
         colorSum += ApplyAmbientLight(diffuseAlbedo, ao, GetAmbientColor());
     }
-
+    
     float gloss = 128.0;
     float3 specularAlbedo = float3(0.56, 0.56, 0.56);
     float specularMask = texSpecular.Sample(sampler_linear_clamp, uvset).g;

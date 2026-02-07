@@ -146,7 +146,8 @@ struct CameraCB
     "CBV(b0, space = 0, visibility = SHADER_VISIBILITY_VERTEX), " \
     "CBV(b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL), " \
 	"DescriptorTable(CBV(b0, numDescriptors = 10, space = 1), visibility = SHADER_VISIBILITY_ALL)," \
-    "DescriptorTable(SRV(t0, numDescriptors = 20, space = 0), visibility = SHADER_VISIBILITY_ALL)," \
+    "DescriptorTable(SRV(t0, numDescriptors = 10, space = 0), visibility = SHADER_VISIBILITY_ALL)," \
+    "DescriptorTable(SRV(t10, numDescriptors = 10, space = 0), visibility = SHADER_VISIBILITY_PIXEL)," \
 	"DescriptorTable(UAV(u0, numDescriptors = 10, space = 0), visibility = SHADER_VISIBILITY_ALL)," \
     "StaticSampler(s100, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
     "StaticSampler(s101, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \

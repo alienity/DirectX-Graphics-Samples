@@ -186,6 +186,49 @@ void ByteAddressBuffer::CreateDerivedViews(void)
     g_Device->CreateUnorderedAccessView( m_pResource.Get(), nullptr, &UAVDesc, m_UAV );
 }
 
+ByteAddressBuffer ByteAddressBuffer::CreateCBVReady(const std::wstring& name, uint32_t sizeInBytes, 
+    const void* initialData)
+{
+    ByteAddressBuffer buffer;
+    UINT alignedSize = Math::AlignUp(sizeInBytes, 256);
+    
+    if (alignedSize != sizeInBytes)
+    {
+        Utility::Printf("ByteAddressBuffer '%ws': Size adjusted from %u to %u bytes for CBV alignment\n", 
+                       name.c_str(), sizeInBytes, alignedSize);
+    }
+    
+    buffer.Create(name, 1, alignedSize, initialData);
+    return buffer;
+}
+
+const D3D12_CPU_DESCRIPTOR_HANDLE& ByteAddressBuffer::GetCBV(void)
+{
+    if (m_CBV.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
+    {
+        UINT alignedSize = Math::AlignUp((UINT)m_BufferSize, 256);
+        if (alignedSize > m_BufferSize)
+        {
+            ASSERT(false, "ByteAddressBuffer size is not aligned to 256 bytes. "
+                  "For CBV usage, buffer size should be pre-allocated as multiple of 256.");
+            alignedSize = Math::AlignDown((UINT)m_BufferSize, 256);
+            if (alignedSize == 0 && m_BufferSize >= 256)
+                alignedSize = 256;
+        }
+        
+        if (alignedSize > 0)
+        {
+            m_CBV = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {};
+            CBVDesc.BufferLocation = m_GpuVirtualAddress;
+            CBVDesc.SizeInBytes = alignedSize;
+            g_Device->CreateConstantBufferView(&CBVDesc, m_CBV);
+        }
+    }
+    
+    return m_CBV;
+}
+
 void StructuredBuffer::CreateDerivedViews(void)
 {
     D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};

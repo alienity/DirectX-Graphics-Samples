@@ -107,7 +107,20 @@ inline D3D12_INDEX_BUFFER_VIEW GpuBuffer::IndexBufferView(size_t Offset, uint32_
 class ByteAddressBuffer : public GpuBuffer
 {
 public:
+    ByteAddressBuffer(void)
+    {
+        m_CBV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
+    }
+    
+    static ByteAddressBuffer CreateCBVReady(const std::wstring& name, uint32_t sizeInBytes, 
+        const void* initialData = nullptr);
+    
     virtual void CreateDerivedViews(void) override;
+    
+    const D3D12_CPU_DESCRIPTOR_HANDLE& GetCBV(void);
+    
+private:
+    D3D12_CPU_DESCRIPTOR_HANDLE m_CBV;
 };
 
 class IndirectArgsBuffer : public ByteAddressBuffer

@@ -9,12 +9,12 @@ CONSTANTBUFFER(g_xVoxelizer, VoxelizerCB, CBSLOT_RENDERER_VOXELIZER);
 CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
 CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
 
-Texture2D<float> texture_depth : register(t10);
-Texture2D<float2> texture_normal : register(t11);
-Texture2D<float4> texture_roughness : register(t12);
+Texture2D<float> texture_depth : register(t0);
+Texture2D<float2> texture_normal : register(t1);
+Texture2D<float4> texture_roughness : register(t2);
 
-Texture3D<float4> texture_radiance : register(t15);
-Texture3D<float> texture_sdf : register(t16);
+Texture3D<float4> texture_radiance : register(t3);
+Texture3D<float> texture_sdf : register(t4);
 
 RWTexture2D<float4> output : register(u0);
 

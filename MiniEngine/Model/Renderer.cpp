@@ -97,13 +97,14 @@ void Renderer::Initialize(void)
     m_RootSig[kSkinMatrices].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
     m_RootSig.Finalize(L"RootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
-    m_VoxelRootSig.Reset(6, 10);
+    m_VoxelRootSig.Reset(7, 10);
     m_VoxelRootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0);
     m_VoxelRootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX, 0);
     m_VoxelRootSig[2].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL, 0);
     m_VoxelRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 1);
-    m_VoxelRootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_ALL, 0);
-    m_VoxelRootSig[5].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0);
+    m_VoxelRootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0);
+    m_VoxelRootSig[5].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10, D3D12_SHADER_VISIBILITY_PIXEL, 0);
+    m_VoxelRootSig[6].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 0);
     
     // Additional static samplers as requested
     SamplerDesc Sampler110Desc;
