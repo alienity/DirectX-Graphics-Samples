@@ -2,26 +2,9 @@
 #include "VXGIRenderer.hlsli"
 #include "VoxelConeTracing.hlsli"
 
-#define Temporal_RootSig \
-    "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
-    "RootConstants(num32BitConstants=12, b999), " \
-    "CBV(b0, space = 0, visibility = SHADER_VISIBILITY_VERTEX), " \
-    "CBV(b0, space = 0, visibility = SHADER_VISIBILITY_PIXEL), " \
-	"DescriptorTable(CBV(b0, numDescriptors = 10, space = 1), visibility = SHADER_VISIBILITY_ALL)," \
-    "DescriptorTable(SRV(t0, numDescriptors = 20, space = 0), visibility = SHADER_VISIBILITY_ALL)," \
-	"DescriptorTable(UAV(u0, numDescriptors = 10, space = 0), visibility = SHADER_VISIBILITY_ALL)," \
-    "StaticSampler(s100, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
-    "StaticSampler(s101, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
-    "StaticSampler(s102, addressU = TEXTURE_ADDRESS_MIRROR, addressV = TEXTURE_ADDRESS_MIRROR, addressW = TEXTURE_ADDRESS_MIRROR, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
-    "StaticSampler(s103, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_MIN_MAG_MIP_POINT)," \
-    "StaticSampler(s104, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_MIN_MAG_MIP_POINT)," \
-    "StaticSampler(s105, addressU = TEXTURE_ADDRESS_MIRROR, addressV = TEXTURE_ADDRESS_MIRROR, addressW = TEXTURE_ADDRESS_MIRROR, filter = FILTER_MIN_MAG_MIP_POINT)," \
-    "StaticSampler(s106, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_ANISOTROPIC, maxAnisotropy = 16)," \
-    "StaticSampler(s107, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_ANISOTROPIC, maxAnisotropy = 16)," \
-    "StaticSampler(s108, addressU = TEXTURE_ADDRESS_MIRROR, addressV = TEXTURE_ADDRESS_MIRROR, addressW = TEXTURE_ADDRESS_MIRROR, filter = FILTER_ANISOTROPIC, maxAnisotropy = 16)," \
-    "StaticSampler(s109, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, comparisonFunc = COMPARISON_GREATER_EQUAL)," \
-
-
+CONSTANTBUFFER(g_xVoxelizer, VoxelizerCB, CBSLOT_RENDERER_VOXELIZER);
+CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
+CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
 
 Texture3D<float4> input_previous_radiance : register(t0);
 Texture3D<uint> input_render_atomic : register(t1);
@@ -91,7 +74,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 				// // lighting.indirect.diffuse += GetAmbient(N) * (1 - trace.a);
 				// radiance.rgb *= lighting.direct.diffuse / PI + lighting.indirect.diffuse;
 				half3 directdiffuse = directLight;
-				half4 trace = ConeTraceDiffuse(input_previous_radiance, texture_sdf, P, N);
+				half4 trace = ConeTraceDiffuse(g_xFrame, input_previous_radiance, texture_sdf, P, N);
 				half3 indirectdiffuse = trace.rgb;
 				radiance.rgb *= directdiffuse / PI + indirectdiffuse;
 				

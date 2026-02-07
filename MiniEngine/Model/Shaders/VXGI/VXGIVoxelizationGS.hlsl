@@ -20,6 +20,10 @@ struct GSOutput
 #endif // VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
 };
 
+CONSTANTBUFFER(g_xVoxelizer, VoxelizerCB, CBSLOT_RENDERER_VOXELIZER);
+CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
+CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
+
 [RootSignature(Voxel_RootSig)]
 [maxvertexcount(3)]
 void main(

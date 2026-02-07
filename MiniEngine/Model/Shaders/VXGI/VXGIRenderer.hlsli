@@ -140,9 +140,6 @@ struct CameraCB
     ShaderCamera cameras[16];
 };
 
-CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
-CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
-
 #define Voxel_RootSig \
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), " \
     "RootConstants(num32BitConstants=12, b999), " \

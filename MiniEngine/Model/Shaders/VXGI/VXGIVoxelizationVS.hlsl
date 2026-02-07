@@ -1,6 +1,14 @@
 #include "VXGIRenderer.hlsli"
 
-cbuffer VSConstants : register(b0)
+// cbuffer VSConstants : register(b0)
+// {
+//     float4x4 modelMatrix;
+//     float4x4 modelMatrixIT;
+//     int cameraIndex;
+//     int3 Pad0;
+// };
+
+struct VSConstants
 {
     float4x4 modelMatrix;
     float4x4 modelMatrixIT;
@@ -8,19 +16,25 @@ cbuffer VSConstants : register(b0)
     int3 Pad0;
 };
 
+ConstantBuffer<VSConstants> m_xVSConstants : register(b0);
+
+CONSTANTBUFFER(g_xVoxelizer, VoxelizerCB, CBSLOT_RENDERER_VOXELIZER);
+CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
+CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
+
 float4x4 getModelMatrix()
 {
-    return modelMatrix;
+    return m_xVSConstants.modelMatrix;
 }
 
 float4x4 getModelMatrixIT()
 {
-    return modelMatrixIT;
+    return m_xVSConstants.modelMatrixIT;
 }
 
 int getCameraIndex()
 {
-    return cameraIndex;
+    return m_xVSConstants.cameraIndex;
 }
 
 struct VSInput

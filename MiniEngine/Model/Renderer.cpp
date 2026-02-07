@@ -98,6 +98,7 @@ void Renderer::Initialize(void)
     m_RootSig.Finalize(L"RootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     m_VoxelRootSig.Reset(6, 10);
+    m_VoxelRootSig[0].InitAsConstants(999, 12, D3D12_SHADER_VISIBILITY_ALL, 0);
     m_VoxelRootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX, 0);
     m_VoxelRootSig[2].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL, 0);
     m_VoxelRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 0, 10, D3D12_SHADER_VISIBILITY_ALL, 1);

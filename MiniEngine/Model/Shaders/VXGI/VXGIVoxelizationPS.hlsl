@@ -1,14 +1,11 @@
 #include "../LightGrid.hlsli"
 #include "VXGIRenderer.hlsli"
 
-cbuffer PSConstants : register(b0)
+struct PSConstants
 {
     float3 SunDirection;
-    float Pad0;
     float3 SunColor;
-    float Pad1;
     float3 AmbientColor;
-    float Pad2;
     float4 ShadowTexelSize;
 
     float4 InvTileDim;
@@ -16,12 +13,20 @@ cbuffer PSConstants : register(b0)
     uint4 FirstLightIndex;
 
     uint FrameIndexMod2;
-    float3 Pad3;
     
     float4x4 modelToShadow;
     float3 viewerPos;
-    int Pad4;
-}
+};
+
+ConstantBuffer<PSConstants> m_xPSConstants : register(b0);
+
+ConstantBuffer<VoxelizerCB> g_xVoxelizer : register(b0, space1);
+ConstantBuffer<FrameCB> g_xFrame : register(b1, space1);
+ConstantBuffer<CameraCB> g_xCamera : register(b2, space1);
+
+// CONSTANTBUFFER(g_xVoxelizer, VoxelizerCB, CBSLOT_RENDERER_VOXELIZER);
+// CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
+// CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
 
 Texture2D<float3> texBaseColor : register(t0);
 Texture2D<float3> texSpecular : register(t1);
@@ -31,6 +36,7 @@ Texture2D<float3> texNormal : register(t3);
 //Texture2D<float4> texReflection	: register(t5);
 Texture2D<float> texSSAO : register(t12);
 Texture2D<float> texShadow : register(t13);
+
 StructuredBuffer<LightData> lightBuffer : register(t14);
 Texture2DArray<float> lightShadowArrayTex : register(t15);
 ByteAddressBuffer lightGrid : register(t16);
@@ -39,6 +45,72 @@ ByteAddressBuffer lightGridBitMask : register(t17);
 Texture3D<float4> input_previous_radiance : register(t18);
 
 RWTexture3D<uint> output_atomic : register(u0);
+
+float3 GetSunColor()
+{
+    return m_xPSConstants.SunColor;
+}
+
+float3 GetSunDirection()
+{
+    return m_xPSConstants.SunDirection;
+}
+
+float3 GetAmbientColor()
+{
+    return m_xPSConstants.AmbientColor;
+}
+
+float4 GetShadowTexelSize()
+{
+    return m_xPSConstants.ShadowTexelSize;
+}
+
+float4 GetInvTileDim()
+{
+    return m_xPSConstants.InvTileDim;
+}
+
+uint4 GetTileCount()
+{
+    return m_xPSConstants.TileCount;
+}
+
+uint4 GetFirstLightIndex()
+{
+    return m_xPSConstants.FirstLightIndex;
+}
+
+uint GetFrameIndexMod2()
+{
+    return m_xPSConstants.FrameIndexMod2;
+}
+
+float4x4 GetModelToShadow()
+{
+    return m_xPSConstants.modelToShadow;
+}
+
+float3 GetViewerPos()
+{
+    return m_xPSConstants.viewerPos;
+}
+
+float3 GetLightingColor()
+{
+    return m_xPSConstants.SunColor + m_xPSConstants.AmbientColor;
+}
+
+float4 GetTileInfo()
+{
+    return float4(m_xPSConstants.TileCount.xyz, m_xPSConstants.FrameIndexMod2);
+}
+
+bool IsEvenFrame()
+{
+    return (m_xPSConstants.FrameIndexMod2 == 0);
+}
+
 
 void AntiAliasSpecular(inout float3 texNormal, inout float gloss)
 {
@@ -73,10 +145,10 @@ float GetDirectionalShadow(float3 ShadowCoord, Texture2D<float> texShadow)
     float result = texShadow.SampleCmpLevelZero( sampler_cmp_depth, ShadowCoord.xy, ShadowCoord.z );
 #else
     const float Dilation = 2.0;
-    float d1 = Dilation * ShadowTexelSize.x * 0.125;
-    float d2 = Dilation * ShadowTexelSize.x * 0.875;
-    float d3 = Dilation * ShadowTexelSize.x * 0.625;
-    float d4 = Dilation * ShadowTexelSize.x * 0.375;
+    float d1 = Dilation * GetShadowTexelSize().x * 0.125;
+    float d2 = Dilation * GetShadowTexelSize().x * 0.875;
+    float d3 = Dilation * GetShadowTexelSize().x * 0.625;
+    float d4 = Dilation * GetShadowTexelSize().x * 0.375;
     float result = (
         2.0 * texShadow.SampleCmpLevelZero(sampler_cmp_depth, ShadowCoord.xy, ShadowCoord.z) +
         texShadow.SampleCmpLevelZero(sampler_cmp_depth, ShadowCoord.xy + float2(-d2, d1), ShadowCoord.z) +
@@ -327,8 +399,8 @@ void ShadeLights(inout float3 colorSum, uint2 pixelPos,
 	float3 worldPos
 	)
 {
-    uint2 tilePos = GetTilePos(pixelPos, InvTileDim.xy);
-    uint tileIndex = GetTileIndex(tilePos, TileCount.x);
+    uint2 tilePos = GetTilePos(pixelPos, GetInvTileDim().xy);
+    uint tileIndex = GetTileIndex(tilePos, GetTileCount().x);
     uint tileOffset = GetTileOffset(tileIndex);
 
     // Light Grid Preloading setup
@@ -379,11 +451,11 @@ void ShadeLights(inout float3 colorSum, uint2 pixelPos,
 
             LightData lightData = lightBuffer[lightIndex];
 
-            if (lightIndex < FirstLightIndex.x) // sphere
+            if (lightIndex < GetFirstLightIndex().x) // sphere
             {
                 colorSum += ApplyPointLight(POINT_LIGHT_ARGS);
             }
-            else if (lightIndex < FirstLightIndex.y) // cone
+            else if (lightIndex < GetFirstLightIndex().y) // cone
             {
                 colorSum += ApplyConeLight(CONE_LIGHT_ARGS);
             }
@@ -616,16 +688,6 @@ void ShadeLights(inout float3 colorSum, uint2 pixelPos,
 #endif
 }
 
-float4x4 getModelToShadow()
-{
-    return modelToShadow;
-}
-
-float3 getViewerPos()
-{
-    return viewerPos;
-}
-
 void VoxelAtomicAverage(inout RWTexture3D<uint> output, in uint3 dest, in float4 color)
 {
     float4 addingColor = float4(color.rgb, 1);
@@ -699,8 +761,8 @@ void main(PSInput input)
 		return;
 #endif // VOXELIZATION_CONSERVATIVE_RASTERIZATION_ENABLED
 
-	float3 viewDir = normalize(P - getViewerPos());
-	float3 shadowCoord = mul(getModelToShadow(), float4(P, 1.0)).xyz;
+	float3 viewDir = normalize(P - GetViewerPos());
+	float3 shadowCoord = mul(GetModelToShadow(), float4(P, 1.0)).xyz;
 	
     float4 baseColor = float4(1, 1, 1, 1);
     float lod_bias = 0;
@@ -717,13 +779,13 @@ void main(PSInput input)
     float3 colorSum = 0;
     {
         float ao = texSSAO[pixelPos];
-        colorSum += ApplyAmbientLight(diffuseAlbedo, ao, AmbientColor);
+        colorSum += ApplyAmbientLight(diffuseAlbedo, ao, GetAmbientColor());
     }
 
     float gloss = 128.0;
     float3 specularAlbedo = float3(0.56, 0.56, 0.56);
     float specularMask = texSpecular.Sample(sampler_linear_clamp, uvset).g;
-    colorSum += ApplyDirectionalLight(diffuseAlbedo, specularAlbedo, specularMask, gloss, N, viewDir, SunDirection, SunColor, shadowCoord, texShadow);
+    colorSum += ApplyDirectionalLight(diffuseAlbedo, specularAlbedo, specularMask, gloss, N, viewDir, GetSunDirection(), GetSunColor(), shadowCoord, texShadow);
 
     ShadeLights(colorSum, pixelPos,
 		diffuseAlbedo,

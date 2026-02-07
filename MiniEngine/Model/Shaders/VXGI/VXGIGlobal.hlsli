@@ -155,11 +155,19 @@ float4 unpack_unorm16x4(uint2 value)
 	return retVal;
 }
 
-template<typename T>
-T inverse_lerp(T value1, T value2, T pos)
-{
-	return all(value2 == value1) ? 0 : ((pos - value1) / (value2 - value1));
+#define INVERSE_LERP(T) \
+T inverse_lerp(T value1, T value2, T pos) \
+{\
+    return all(value2 == value1) ? 0 : ((pos - value1) / (value2 - value1));\
 }
+INVERSE_LERP(float)
+INVERSE_LERP(float2)
+INVERSE_LERP(float3)
+INVERSE_LERP(float4)
+INVERSE_LERP(half)
+INVERSE_LERP(half2)
+INVERSE_LERP(half3)
+INVERSE_LERP(half4)
 
 // Source: https://www.shadertoy.com/view/3s33zj
 float3x3 adjoint(in float4x4 m)
@@ -281,46 +289,53 @@ SamplerComparisonState sampler_cmp_depth : register(s109);
 #define SPHERE_SAMPLING_PDF rcp(4 * PI)
 #define HEMISPHERE_SAMPLING_PDF rcp(2 * PI)
 
-template<typename T>
-T sqr(T a)
-{
-	return a * a;
+#define DEFINE_POW_FUNCTIONS(T) \
+T sqr(T a) \
+{ \
+    return a * a; \
+} \
+T pow3(T a) \
+{ \
+    return a * a * a; \
+} \
+T pow4(T a) \
+{ \
+    return sqr(sqr(a)); \
+} \
+T pow5(T a) \
+{ \
+    return pow4(a) * a; \
+} \
+T pow8(T a) \
+{ \
+    return sqr(pow4(a)); \
 }
-template<typename T>
-T pow3(T a)
-{
-	return a * a * a;
-}
-template<typename T>
-T pow4(T a)
-{
-	return sqr(sqr(a));
-}
-template<typename T>
-T pow5(T a)
-{
-	return pow4(a) * a;
-}
-template<typename T>
-T pow8(T a)
-{
-	return sqr(pow4(a));
-}
+
+DEFINE_POW_FUNCTIONS(float)
+DEFINE_POW_FUNCTIONS(float2)
+DEFINE_POW_FUNCTIONS(float3)
+DEFINE_POW_FUNCTIONS(float4)
+DEFINE_POW_FUNCTIONS(half)
+DEFINE_POW_FUNCTIONS(half2)
+DEFINE_POW_FUNCTIONS(half3)
+DEFINE_POW_FUNCTIONS(half4)
 
 #define arraysize(a) (sizeof(a) / sizeof(a[0]))
 #define saturateMediump(x) min(x, MEDIUMP_FLT_MAX)
 #define highp
 
-template<typename T>
-float max3(T v)
-{
-	return max(max(v.x, v.y), v.z);
+#define DEFINE_MAXMIN3_FUNCTIONS(T) \
+float max3(T v) \
+{ \
+    return max(max(v.x, v.y), v.z); \
+} \
+float min3(T v) \
+{ \
+    return min(min(v.x, v.y), v.z); \
 }
-template<typename T>
-float min3(T v)
-{
-	return min(min(v.x, v.y), v.z);
-}
+
+DEFINE_MAXMIN3_FUNCTIONS(float3)
+DEFINE_MAXMIN3_FUNCTIONS(half3)
 
 float min3(float a, float b, float c)
 {
@@ -386,18 +401,26 @@ float4 med3(float4 a, float4 b, float4 c)
 //	a2 : attribute at triangle corner 2
 //  bary : (u,v) barycentrics [same as you get from raytracing]; w is computed as 1 - u - w
 //	computation can be also written as: p0 * w + p1 * u + p2 * v
-template<
-typename T>
-inline T attribute_at_bary(in T a0, in T a1, in T a2, in float2 bary)
-{
-    return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y));
+#define DEFINE_ATTRIBUTE_AT_BARY_FLOAT(T) \
+inline T attribute_at_bary(in T a0, in T a1, in T a2, in float2 bary) \
+{ \
+    return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y)); \
 }
-template<
-typename T>
-inline T attribute_at_bary(in T a0, in T a1, in T a2, in half2 bary)
-{
-    return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y));
+
+#define DEFINE_ATTRIBUTE_AT_BARY_HALF(T) \
+inline T attribute_at_bary(in T a0, in T a1, in T a2, in half2 bary) \
+{ \
+    return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y)); \
 }
+
+DEFINE_ATTRIBUTE_AT_BARY_FLOAT(float)
+DEFINE_ATTRIBUTE_AT_BARY_FLOAT(float2)
+DEFINE_ATTRIBUTE_AT_BARY_FLOAT(float3)
+DEFINE_ATTRIBUTE_AT_BARY_FLOAT(float4)
+DEFINE_ATTRIBUTE_AT_BARY_HALF(half)
+DEFINE_ATTRIBUTE_AT_BARY_HALF(half2)
+DEFINE_ATTRIBUTE_AT_BARY_HALF(half3)
+DEFINE_ATTRIBUTE_AT_BARY_HALF(half4)
 
 // bilinear interpolation of gathered values based on pixel fraction
 inline float bilinear(float4 gather, float2 pixel_frac)
@@ -413,11 +436,20 @@ inline half bilinear(half4 gather, half2 pixel_frac)
     return lerp(top_row, bottom_row, pixel_frac.y);
 }
 
-template<typename T>
-inline bool is_saturated(T a)
-{
-    return all(a == saturate(a));
+#define DEFINE_IS_SATURATED(T) \
+inline bool is_saturated(T a) \
+{ \
+    return all(a == saturate(a)); \
 }
+
+DEFINE_IS_SATURATED(float)
+DEFINE_IS_SATURATED(float2)
+DEFINE_IS_SATURATED(float3)
+DEFINE_IS_SATURATED(float4)
+DEFINE_IS_SATURATED(half)
+DEFINE_IS_SATURATED(half2)
+DEFINE_IS_SATURATED(half3)
+DEFINE_IS_SATURATED(half4)
 
 inline uint align(uint value, uint alignment)
 {
@@ -1328,15 +1360,21 @@ inline half distance_squared(half3 a, half3 b)
 
 
 // Angle between normalized vectors [-PI, PI]
-template <
-typename T>
-inline half get_angle(T a, T b)
-{
-    half ret = dot(a, b);
-    ret = clamp(ret, -1, 1);
-    ret = acos(ret);
-    return ret;
+#define DEFINE_GET_ANGLE(T) \
+inline half get_angle(T a, T b) \
+{ \
+    half ret = dot(a, b); \
+    ret = clamp(ret, -1, 1); \
+    ret = acos(ret); \
+    return ret; \
 }
+
+DEFINE_GET_ANGLE(float2)
+DEFINE_GET_ANGLE(float3)
+DEFINE_GET_ANGLE(float4)
+DEFINE_GET_ANGLE(half2)
+DEFINE_GET_ANGLE(half3)
+DEFINE_GET_ANGLE(half4)
 
 float plane_point_distance(float3 planeOrigin, float3 planeNormal, float3 P)
 {
@@ -1417,24 +1455,24 @@ float trace_disk(float3 o, float3 d, float3 diskCenter, float diskRadius, float3
     return dot(diff, diff) < sqr(diskRadius);
 }
 
-// Return the closest point on the line (without limit)
-template <
-typename T>
-T closest_point_on_line(T a, T b, T c)
-{
-    T ab = b - a;
-    float t = dot(c - a, ab) / dot(ab, ab);
-    return a + t * ab;
+#define DEFINE_CLOSEST_POINT_FUNCTIONS(T) \
+T closest_point_on_line(T a, T b, T c) \
+{ \
+    T ab = b - a; \
+    float t = dot(c - a, ab) / dot(ab, ab); \
+    return a + t * ab; \
+} \
+T closest_point_on_segment(T a, T b, T c) \
+{ \
+    T ab = b - a; \
+    float t = dot(c - a, ab) / dot(ab, ab); \
+    return a + saturate(t) * ab; \
 }
-// Return the closest point on the segment (with limit) 
-template <
-typename T>
-T closest_point_on_segment(T a, T b, T c)
-{
-    T ab = b - a;
-    float t = dot(c - a, ab) / dot(ab, ab);
-    return a + saturate(t) * ab;
-}
+
+DEFINE_CLOSEST_POINT_FUNCTIONS(float2)
+DEFINE_CLOSEST_POINT_FUNCTIONS(float3)
+DEFINE_CLOSEST_POINT_FUNCTIONS(half2)
+DEFINE_CLOSEST_POINT_FUNCTIONS(half3)
 
 // Compute barycentric coordinates on triangle from a point p
 float2 compute_barycentrics(float3 p, float3 a, float3 b, float3 c)

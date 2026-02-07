@@ -862,17 +862,69 @@ void Sponza::VXGIVoxelize(GraphicsContext& gfxContext, const Camera& camera, con
 
     ScopedTimer _prof(L"VoxelPass", gfxContext);
 
+    __declspec(align(16)) struct VSConstants
+    {
+        XMFLOAT4X4 modelMatrix;
+        XMFLOAT4X4 modelMatrixIT;
+        int cameraIndex;
+    } vsConstants;
+    // For VXGI voxelization, we typically use identity matrix for static models like Sponza
+    vsConstants.modelMatrix = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f };
+    vsConstants.modelMatrixIT = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f };
+    vsConstants.cameraIndex = 0;
+
+    gfxContext.SetDynamicConstantBufferView(1, sizeof(vsConstants), &vsConstants);
+
+    uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
+
+    __declspec(align(16)) struct PSConstants
+    {
+        Vector3 SunDirection;
+        Vector3 SunColor;
+        Vector3 AmbientColor;
+        float ShadowTexelSize[4];
+        float InvTileDim[4];
+        uint32_t TileCount[4];
+        uint32_t FirstLightIndex[4];
+        uint32_t FrameIndexMod2;
+        Matrix4 modelToShadow;
+        XMFLOAT3 viewerPos;
+    } psConstants;
+
+    psConstants.SunDirection = m_Scene.m_SunDirection;
+    psConstants.SunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
+    psConstants.AmbientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
+    psConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
+    psConstants.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
+    psConstants.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
+    psConstants.TileCount[0] = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
+    psConstants.TileCount[1] = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
+    psConstants.FirstLightIndex[0] = Lighting::m_FirstConeLight;
+    psConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
+    psConstants.FrameIndexMod2 = FrameIndex;
+    psConstants.modelToShadow = m_Scene.m_SunShadow.GetShadowMatrix();
+    XMStoreFloat3(&psConstants.viewerPos, camera.GetPosition());
+
+    gfxContext.SetDynamicConstantBufferView(2, sizeof(psConstants), &psConstants);
+
     gfxContext.SetDynamicDescriptor(3, 0, m_Scene.m_xFrame.GetSRV());
     gfxContext.SetDynamicDescriptor(3, 1, m_Scene.m_xCamera.GetSRV());
     gfxContext.SetDynamicDescriptor(3, 2, m_Scene.vxgi.m_xVoxelizer.GetSRV());
 
+    gfxContext.SetDynamicDescriptor(5, 0, m_Scene.vxgi.render_atomic.GetUAV());
+
     {
         ScopedTimer _prof2(L"OpaqueVoxel", gfxContext);
         {
-            //gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
-            //gfxContext.ClearDepth(g_SceneDepthBuffer);
             gfxContext.SetPipelineState(m_VoxelPSO);
-            //gfxContext.SetDepthStencilTarget(g_SceneDepthBuffer.GetDSV());
             gfxContext.SetViewportAndScissor(viewport, scissor);
         }
         VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kOpaque);
@@ -882,6 +934,7 @@ void Sponza::VXGIVoxelize(GraphicsContext& gfxContext, const Camera& camera, con
         ScopedTimer _prof2(L"CutoutVoxel", gfxContext);
         {
             gfxContext.SetPipelineState(m_CutoutVoxelPSO);
+            gfxContext.SetViewportAndScissor(viewport, scissor);
         }
         VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kCutout);
     }
@@ -895,53 +948,29 @@ void Sponza::VXGIResolve(GraphicsContext& gfxContext, const Camera& camera, cons
 
 void Sponza::VoxelizeObjects(GraphicsContext& gfxContext, const Matrix4& ViewProjMat, const Vector3& viewerPos, eObjectFilter Filter)
 {
+    __declspec(align(16)) uint32_t materialIdx = 0xFFFFFFFFul;
+
     uint32_t VertexStride = m_Scene.m_Model.GetVertexStride();
 
     for (uint32_t meshIndex = 0; meshIndex < m_Scene.m_Model.GetMeshCount(); meshIndex++)
     {
         const ModelH3D::Mesh& mesh = m_Scene.m_Model.GetMesh(meshIndex);
 
-        __declspec(align(16)) struct VSConstants
-        {
-            XMFLOAT4X4 modelMatrix;
-            XMFLOAT4X4 modelMatrixIT;
-            int cameraIndex;
-        } vsConstants;
-        // For VXGI voxelization, we typically use identity matrix for static models like Sponza
-        vsConstants.modelMatrix = {
-            1.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f};
-        vsConstants.modelMatrixIT = {
-            1.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f};
-        vsConstants.cameraIndex = 0;
-
-        gfxContext.SetDynamicConstantBufferView(1, sizeof(vsConstants), &vsConstants);
-
-
         uint32_t indexCount = mesh.indexCount;
         uint32_t startIndex = mesh.indexDataByteOffset / sizeof(uint16_t);
         uint32_t baseVertex = mesh.vertexDataByteOffset / VertexStride;
 
-        __declspec(align(16)) struct PSConstants
+        if (mesh.materialIndex != materialIdx)
         {
-            XMFLOAT3 SunDirection;
-            XMFLOAT3 SunColor;
-            XMFLOAT3 AmbientColor;
-            XMFLOAT4 ShadowTexelSize;
-            XMFLOAT4 InvTileDim;
-            XMUINT4 TileCount;
-            XMUINT4 FirstLightIndex;
-            uint32_t FrameIndexMod2;
-            XMFLOAT4X4 modelToShadow;
-            XMFLOAT3 viewerPos;
-        } psConstants;
+            if (m_Scene.m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kCutout) ||
+                !m_Scene.m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kOpaque))
+                continue;
 
-        gfxContext.SetDynamicConstantBufferView(2, sizeof(psConstants), &psConstants);
+            materialIdx = mesh.materialIndex;
+            gfxContext.SetDescriptorTable(4, m_Scene.m_Model.GetSRVs(materialIdx));
+
+            //gfxContext.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(uint32_t), &materialIdx);
+        }
 
         gfxContext.DrawIndexed(indexCount, startIndex, baseVertex);
     }
@@ -985,6 +1014,8 @@ void Sponza::RenderScene(
     bool skipShadowMap)
 {
     Renderer::UpdateGlobalDescriptors();
+
+	m_Scene.Update(gfxContext, camera);
 
     uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
 
