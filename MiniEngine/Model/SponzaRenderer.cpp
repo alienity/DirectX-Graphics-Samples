@@ -669,6 +669,26 @@ namespace VXGI
                 context.WriteBuffer(m_xCamera, 0, &cb, sizeof(cb));
                 context.TransitionResource(m_xCamera, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
             }
+
+            if (vxgi.pre_clear)
+            {
+                context.TransitionResource(vxgi.render_atomic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.TransitionResource(vxgi.prev_radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.TransitionResource(vxgi.radiance, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.TransitionResource(vxgi.sdf, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.TransitionResource(vxgi.sdf_temp, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+                {
+                    GraphicsContext& gfxContext = context.GetGraphicsContext();
+                    gfxContext.ClearUAV(vxgi.render_atomic);
+                    gfxContext.ClearUAV(vxgi.prev_radiance);
+                    gfxContext.ClearUAV(vxgi.radiance);
+                    gfxContext.ClearUAV(vxgi.sdf);
+                    gfxContext.ClearUAV(vxgi.sdf_temp);
+                }
+
+                vxgi.pre_clear = false;
+            }
         }
     };
 }
@@ -680,7 +700,6 @@ namespace Sponza
     enum eObjectFilter { kOpaque = 0x1, kCutout = 0x2, kTransparent = 0x4, kAll = 0xF, kNone = 0x0 };
     void RenderObjects( GraphicsContext& Context, const Matrix4& ViewProjMat, const Vector3& viewerPos, eObjectFilter Filter = kAll );
 
-    void VXGIResolve(GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
     void VoxelizeObjects( GraphicsContext& Context, const Matrix4& ViewProjMat, const Vector3& viewerPos, eObjectFilter Filter = kAll );
 
     GraphicsPSO m_DepthPSO = { (L"Sponza: Depth PSO") };
@@ -870,11 +889,6 @@ void Sponza::RenderObjects( GraphicsContext& gfxContext, const Matrix4& ViewProj
     }
 }
 
-void Sponza::VXGIResolve(GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
-{
-
-}
-
 void Sponza::VoxelizeObjects(GraphicsContext& gfxContext, const Matrix4& ViewProjMat, const Vector3& viewerPos, eObjectFilter Filter)
 {
     __declspec(align(16)) uint32_t materialIdx = 0xFFFFFFFFul;
@@ -1058,6 +1072,148 @@ void Sponza::RenderScene(
         }
     }
 
+    {
+        gfxContext.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        
+        {
+            D3D12_VIEWPORT m_VoxelViewport;
+            m_VoxelViewport.Width = (float)m_Scene.vxgi.res;
+            m_VoxelViewport.Height = (float)m_Scene.vxgi.res;
+            m_VoxelViewport.MinDepth = 0.0f;
+            m_VoxelViewport.MaxDepth = 1.0f;
+
+            D3D12_RECT m_VoxelScissor;
+            m_VoxelScissor.left = 0;
+            m_VoxelScissor.top = 0;
+            m_VoxelScissor.right = (LONG)m_Scene.vxgi.res;
+            m_VoxelScissor.bottom = (LONG)m_Scene.vxgi.res;
+
+            __declspec(align(16)) struct VSConstants
+            {
+                XMFLOAT4X4 modelMatrix;
+                XMFLOAT4X4 modelMatrixIT;
+                int cameraIndex;
+            } mVSConstants;
+            // For VXGI voxelization, we typically use identity matrix for static models like Sponza
+            mVSConstants.modelMatrix = {
+                1.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, 1.0f, 0.0f, 0.0f,
+                0.0f, 0.0f, 1.0f, 0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f };
+            mVSConstants.modelMatrixIT = {
+                1.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, 1.0f, 0.0f, 0.0f,
+                0.0f, 0.0f, 1.0f, 0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f };
+            mVSConstants.cameraIndex = 0;
+
+            uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
+
+            __declspec(align(16)) struct PSConstants
+            {
+                Vector3 SunDirection;
+                Vector3 SunColor;
+                Vector3 AmbientColor;
+                float ShadowTexelSize[4];
+                float InvTileDim[4];
+                uint32_t TileCount[4];
+                uint32_t FirstLightIndex[4];
+                uint32_t FrameIndexMod2;
+                Matrix4 modelToShadow;
+                XMFLOAT3 viewerPos;
+            } mPSConstants;
+
+            mPSConstants.SunDirection = m_Scene.m_SunDirection;
+            mPSConstants.SunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
+            mPSConstants.AmbientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
+            mPSConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
+            mPSConstants.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
+            mPSConstants.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
+            mPSConstants.TileCount[0] = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
+            mPSConstants.TileCount[1] = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
+            mPSConstants.FirstLightIndex[0] = Lighting::m_FirstConeLight;
+            mPSConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
+            mPSConstants.FrameIndexMod2 = FrameIndex;
+            mPSConstants.modelToShadow = m_Scene.m_SunShadow.GetShadowMatrix();
+            XMStoreFloat3(&mPSConstants.viewerPos, camera.GetPosition());
+
+            gfxContext.SetRootSignature(Renderer::m_VoxelRootSig);
+            gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
+            gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            gfxContext.SetIndexBuffer(m_Scene.m_Model.GetIndexBuffer());
+            gfxContext.SetVertexBuffer(0, m_Scene.m_Model.GetVertexBuffer());
+
+            ScopedTimer _prof(L"VoxelPass", gfxContext);
+
+            gfxContext.SetDynamicConstantBufferView(1, sizeof(mVSConstants), &mVSConstants);
+            gfxContext.SetDynamicConstantBufferView(2, sizeof(mPSConstants), &mPSConstants);
+
+            gfxContext.SetDescriptorTable(3, VXGI::m_CommonBuffers);
+
+            gfxContext.SetDescriptorTable(5, Renderer::m_CommonTextures);
+
+            gfxContext.SetDescriptorTable(6, VXGI::m_CommonUAVs);
+
+            {
+                ScopedTimer _prof2(L"OpaqueVoxel", gfxContext);
+                {
+                    gfxContext.SetPipelineState(m_VoxelPSO);
+                    gfxContext.SetRenderTargets(0, nullptr);
+                    gfxContext.SetViewportAndScissor(m_VoxelViewport, m_VoxelScissor);
+                }
+                VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kOpaque);
+            }
+
+            {
+                ScopedTimer _prof2(L"CutoutVoxel", gfxContext);
+                {
+                    gfxContext.SetPipelineState(m_CutoutVoxelPSO);
+                    gfxContext.SetRenderTargets(0, nullptr);
+                    gfxContext.SetViewportAndScissor(m_VoxelViewport, m_VoxelScissor);
+                }
+                VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kCutout);
+            }
+
+            gfxContext.TransitionResource(m_Scene.vxgi.render_atomic, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+            gfxContext.TransitionResource(m_Scene.vxgi.prev_radiance, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+        }
+
+        {
+            ScopedTimer _prof(L"Temporal Blend Voxels", gfxContext);
+
+
+
+
+        }
+
+        {
+            ScopedTimer _prof(L"SDF Jump Flood", gfxContext);
+
+
+        }
+
+        {
+            ScopedTimer _prof(L"Resolve", gfxContext);
+
+
+            {
+                ScopedTimer _prof2(L"Diffuse", gfxContext);
+
+
+            }
+
+
+            {
+                ScopedTimer _prof2(L"Specular", gfxContext);
+
+
+            }
+        }
+
+    };
+
+    pfnSetupGraphicsState();
+
     if (!skipDiffusePass)
     {
         if (!SSAO::DebugDraw)
@@ -1095,109 +1251,5 @@ void Sponza::RenderScene(
     }
 
 
-    {
-        D3D12_VIEWPORT m_VoxelViewport;
-        m_VoxelViewport.Width = (float)m_Scene.vxgi.res;
-        m_VoxelViewport.Height = (float)m_Scene.vxgi.res;
-        m_VoxelViewport.MinDepth = 0.0f;
-        m_VoxelViewport.MaxDepth = 1.0f;
-
-        D3D12_RECT m_VoxelScissor;
-        m_VoxelScissor.left = 0;
-        m_VoxelScissor.top = 0;
-        m_VoxelScissor.right = (LONG)m_Scene.vxgi.res;
-        m_VoxelScissor.bottom = (LONG)m_Scene.vxgi.res;
-
-        __declspec(align(16)) struct VSConstants
-        {
-            XMFLOAT4X4 modelMatrix;
-            XMFLOAT4X4 modelMatrixIT;
-            int cameraIndex;
-        } mVSConstants;
-        // For VXGI voxelization, we typically use identity matrix for static models like Sponza
-        mVSConstants.modelMatrix = {
-            1.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f };
-        mVSConstants.modelMatrixIT = {
-            1.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f };
-        mVSConstants.cameraIndex = 0;
-
-        uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
-
-        __declspec(align(16)) struct PSConstants
-        {
-            Vector3 SunDirection;
-            Vector3 SunColor;
-            Vector3 AmbientColor;
-            float ShadowTexelSize[4];
-            float InvTileDim[4];
-            uint32_t TileCount[4];
-            uint32_t FirstLightIndex[4];
-            uint32_t FrameIndexMod2;
-            Matrix4 modelToShadow;
-            XMFLOAT3 viewerPos;
-        } mPSConstants;
-
-        mPSConstants.SunDirection = m_Scene.m_SunDirection;
-        mPSConstants.SunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
-        mPSConstants.AmbientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
-        mPSConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
-        mPSConstants.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
-        mPSConstants.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
-        mPSConstants.TileCount[0] = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
-        mPSConstants.TileCount[1] = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
-        mPSConstants.FirstLightIndex[0] = Lighting::m_FirstConeLight;
-        mPSConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
-        mPSConstants.FrameIndexMod2 = FrameIndex;
-        mPSConstants.modelToShadow = m_Scene.m_SunShadow.GetShadowMatrix();
-        XMStoreFloat3(&mPSConstants.viewerPos, camera.GetPosition());
-
-        gfxContext.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-        gfxContext.SetRootSignature(Renderer::m_VoxelRootSig);
-        gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
-        gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        gfxContext.SetIndexBuffer(m_Scene.m_Model.GetIndexBuffer());
-        gfxContext.SetVertexBuffer(0, m_Scene.m_Model.GetVertexBuffer());
-
-        ScopedTimer _prof(L"VoxelPass", gfxContext);
-
-        gfxContext.SetDynamicConstantBufferView(1, sizeof(mVSConstants), &mVSConstants);
-        gfxContext.SetDynamicConstantBufferView(2, sizeof(mPSConstants), &mPSConstants);
-
-        gfxContext.SetDescriptorTable(3, VXGI::m_CommonBuffers);
-
-        gfxContext.SetDescriptorTable(5, Renderer::m_CommonTextures);
-
-        gfxContext.SetDescriptorTable(6, VXGI::m_CommonUAVs);
-
-        {
-            ScopedTimer _prof2(L"OpaqueVoxel", gfxContext);
-            {
-                gfxContext.SetPipelineState(m_VoxelPSO);
-                gfxContext.SetRenderTargets(0, nullptr);
-                gfxContext.SetViewportAndScissor(m_VoxelViewport, m_VoxelScissor);
-            }
-            VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kOpaque);
-        }
-
-        {
-            ScopedTimer _prof2(L"CutoutVoxel", gfxContext);
-            {
-                gfxContext.SetPipelineState(m_CutoutVoxelPSO);
-                gfxContext.SetRenderTargets(0, nullptr);
-                gfxContext.SetViewportAndScissor(m_VoxelViewport, m_VoxelScissor);
-            }
-            VoxelizeObjects(gfxContext, camera.GetViewProjMatrix(), camera.GetPosition(), kCutout);
-        }
-
-
-        VXGIResolve(gfxContext, camera, m_VoxelViewport, m_VoxelScissor);
-    };
 
 }
