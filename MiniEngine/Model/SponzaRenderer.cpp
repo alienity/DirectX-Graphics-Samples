@@ -312,6 +312,9 @@ namespace VXGI
 
 namespace VXGI
 {
+    DescriptorHandle m_CommonBuffers;
+    DescriptorHandle m_CommonUAVs;
+
     class InnerScene
     {
     public:
@@ -373,25 +376,7 @@ namespace VXGI
                     m_pMaterialIsCutout[i] = false;
                 }
             }
-        }
 
-        void Destroy()
-        {
-            m_Model.Clear();
-
-            m_xFrame.Destroy();
-            m_xCamera.Destroy();
-
-            vxgi.m_xVoxelizer.Destroy();
-            vxgi.radiance.Destroy();
-            vxgi.prev_radiance.Destroy();
-            vxgi.render_atomic.Destroy();
-            vxgi.sdf.Destroy();
-            vxgi.sdf_temp.Destroy();
-        }
-
-        void Update(CommandContext& context, const Camera& camera)
-        {
             if (vxgi.m_xVoxelizer.GetResource() == nullptr)
             {
                 vxgi.m_xVoxelizer = ByteAddressBuffer::CreateCBVReady(L"g_xVoxelizerCPU", Math::AlignUp(sizeof(VoxelizerCB), 256), nullptr);
@@ -420,6 +405,53 @@ namespace VXGI
                 vxgi.sdf.Create(L"vxgi.sdf", vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16_FLOAT);
                 vxgi.sdf_temp.Create(L"vxgi.sdf_temp", vxgi.res, vxgi.res * VXGI_CLIPMAP_COUNT, vxgi.res, 1, DXGI_FORMAT_R16_FLOAT);
             }
+
+            if (m_CommonBuffers.IsNull())
+            {
+                m_CommonBuffers = Renderer::s_TextureHeap.Alloc(10);
+
+                uint32_t DestCount = 3;
+                uint32_t SourceCounts[] = { 1, 1, 1 };
+                D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+                {
+                    vxgi.m_xVoxelizer.GetCBV(),
+                    m_xFrame.GetCBV(),
+                    m_xCamera.GetCBV()
+                };
+                g_Device->CopyDescriptors(1, &m_CommonBuffers, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            }
+            if (m_CommonUAVs.IsNull())
+            {
+                m_CommonUAVs = Renderer::s_TextureHeap.Alloc(10);
+
+                uint32_t DestCount = 1;
+                uint32_t SourceCounts[] = { 1 };
+                D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+                {
+                    vxgi.render_atomic.GetUAV()
+                };
+                g_Device->CopyDescriptors(1, &m_CommonUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            }
+
+        }
+
+        void Destroy()
+        {
+            m_Model.Clear();
+
+            m_xFrame.Destroy();
+            m_xCamera.Destroy();
+
+            vxgi.m_xVoxelizer.Destroy();
+            vxgi.radiance.Destroy();
+            vxgi.prev_radiance.Destroy();
+            vxgi.render_atomic.Destroy();
+            vxgi.sdf.Destroy();
+            vxgi.sdf_temp.Destroy();
+        }
+
+        void Update(CommandContext& context, const Camera& camera)
+        {
             vxgi.clipmap_to_update = (vxgi.clipmap_to_update + 1) % VXGI_CLIPMAP_COUNT;
 
             // VXGI volume update:
@@ -466,8 +498,8 @@ namespace VXGI
                 cb.time_previous = 0;
                 cb.delta_time = 0;
 
-                cb.temporalaa_samplerotation = 0;
                 cb.frame_count = 0;
+                cb.temporalaa_samplerotation = 0;
                 cb.texture_shadowatlas_index = 0;
                 cb.texture_shadowatlas_transparent_index = 0;
 
@@ -637,8 +669,6 @@ namespace VXGI
                 context.WriteBuffer(m_xCamera, 0, &cb, sizeof(cb));
                 context.TransitionResource(m_xCamera, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
             }
-
-            context.Flush();
         }
     };
 }
@@ -1028,8 +1058,6 @@ void Sponza::RenderScene(
         }
     }
 
-    pfnSetupGraphicsState();
-
     if (!skipDiffusePass)
     {
         if (!SSAO::DebugDraw)
@@ -1142,13 +1170,11 @@ void Sponza::RenderScene(
         gfxContext.SetDynamicConstantBufferView(1, sizeof(mVSConstants), &mVSConstants);
         gfxContext.SetDynamicConstantBufferView(2, sizeof(mPSConstants), &mPSConstants);
 
-        gfxContext.SetDynamicDescriptor(3, 0, m_Scene.m_xFrame.GetCBV());
-        gfxContext.SetDynamicDescriptor(3, 1, m_Scene.m_xCamera.GetCBV());
-        gfxContext.SetDynamicDescriptor(3, 2, m_Scene.vxgi.m_xVoxelizer.GetCBV());
+        gfxContext.SetDescriptorTable(3, VXGI::m_CommonBuffers);
 
         gfxContext.SetDescriptorTable(5, Renderer::m_CommonTextures);
 
-        gfxContext.SetDynamicDescriptor(6, 0, m_Scene.vxgi.render_atomic.GetUAV());
+        gfxContext.SetDescriptorTable(6, VXGI::m_CommonUAVs);
 
         {
             ScopedTimer _prof2(L"OpaqueVoxel", gfxContext);
