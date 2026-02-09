@@ -1,15 +1,16 @@
-#include "../Common.hlsli"
 #include "VXGIRenderer.hlsli"
 #include "VoxelConeTracing.hlsli"
 
-CONSTANTBUFFER(g_xVoxelizer, VoxelizerCB, CBSLOT_RENDERER_VOXELIZER);
-CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
-CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
+ConstantBuffer<VoxelizerCB> g_xVoxelizer : register(b0, space1);
+ConstantBuffer<FrameCB> g_xFrame : register(b1, space1);
+ConstantBuffer<CameraCB> g_xCamera : register(b2, space1);
+
+//CONSTANTBUFFER(g_xVoxelizer, VoxelizerCB, CBSLOT_RENDERER_VOXELIZER);
+//CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
+//CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
 
 Texture3D<float4> input_previous_radiance : register(t0);
 Texture3D<uint> input_render_atomic : register(t1);
-
-Texture3D<float> texture_sdf : register(t2);
 
 RWTexture3D<float4> output_radiance : register(u0);
 RWTexture3D<float> output_sdf : register(u1);
@@ -33,17 +34,17 @@ void main(uint3 DTid : SV_DispatchThreadID)
 		uint3 dst = src;
 		dst.y += g_xVoxelizer.clipmap_index * g_xFrame.vxgi.resolution;
 
-		half4 radiance = 0;
+		float4 radiance = 0;
 		if (i < 6)
 		{
 			src.z *= VOXELIZATION_CHANNEL_COUNT;
 			uint count = input_render_atomic[src + uint3(0, 0, VOXELIZATION_CHANNEL_FRAGMENT_COUNTER)];
 			if (count > 0)
 			{
-				half4 baseColor = 0;
-				half3 emissive = 0;
-				half3 directLight = 0;
-				half3 N = 0;
+				float4 baseColor = 0;
+				float3 emissive = 0;
+				float3 directLight = 0;
+				float3 N = 0;
 				baseColor.r = UnpackVoxelChannel(input_render_atomic[src + uint3(0, 0, VOXELIZATION_CHANNEL_BASECOLOR_R)]);
 				baseColor.g = UnpackVoxelChannel(input_render_atomic[src + uint3(0, 0, VOXELIZATION_CHANNEL_BASECOLOR_G)]);
 				baseColor.b = UnpackVoxelChannel(input_render_atomic[src + uint3(0, 0, VOXELIZATION_CHANNEL_BASECOLOR_B)]);
@@ -69,13 +70,13 @@ void main(uint3 DTid : SV_DispatchThreadID)
 				// Lighting lighting;
 				// lighting.create(0, 0, 0, 0);
 				// lighting.direct.diffuse = directLight;
-				// half4 trace = ConeTraceDiffuse(input_previous_radiance, P, N);
+				// float4 trace = ConeTraceDiffuse(input_previous_radiance, P, N);
 				// lighting.indirect.diffuse = trace.rgb;
 				// // lighting.indirect.diffuse += GetAmbient(N) * (1 - trace.a);
 				// radiance.rgb *= lighting.direct.diffuse / PI + lighting.indirect.diffuse;
-				half3 directdiffuse = directLight;
-				half4 trace = ConeTraceDiffuse(g_xFrame, input_previous_radiance, texture_sdf, P, N);
-				half3 indirectdiffuse = trace.rgb;
+				float3 directdiffuse = directLight;
+				float4 trace = ConeTraceDiffuse(g_xFrame, input_previous_radiance, P, N);
+				float3 indirectdiffuse = trace.rgb;
 				radiance.rgb *= directdiffuse / PI + indirectdiffuse;
 				
 				radiance.rgb += emissive;

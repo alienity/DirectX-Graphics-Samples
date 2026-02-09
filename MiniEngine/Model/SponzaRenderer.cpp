@@ -315,6 +315,9 @@ namespace VXGI
     DescriptorHandle m_CommonBuffers;
     DescriptorHandle m_CommonUAVs;
 
+    DescriptorHandle m_VXGITemporalSRVs;
+    DescriptorHandle m_VXGITemporalUAVs;
+
     class InnerScene
     {
     public:
@@ -432,6 +435,34 @@ namespace VXGI
                 };
                 g_Device->CopyDescriptors(1, &m_CommonUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
             }
+
+            if (m_VXGITemporalSRVs.IsNull())
+            {
+                m_VXGITemporalSRVs = Renderer::s_TextureHeap.Alloc(10);
+
+                uint32_t DestCount = 2;
+                uint32_t SourceCounts[] = { 1, 1 };
+                D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+                {
+                    vxgi.prev_radiance.GetSRV(),
+                    vxgi.render_atomic.GetSRV()
+                };
+                g_Device->CopyDescriptors(1, &m_VXGITemporalSRVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            }
+            if (m_VXGITemporalUAVs.IsNull())
+            {
+                m_VXGITemporalUAVs = Renderer::s_TextureHeap.Alloc(10);
+
+                uint32_t DestCount = 2;
+                uint32_t SourceCounts[] = { 1, 1 };
+                D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+                {
+                    vxgi.radiance.GetUAV(),
+                    vxgi.sdf.GetUAV()
+                };
+                g_Device->CopyDescriptors(1, &m_VXGITemporalUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            }
+
 
         }
 
@@ -689,6 +720,39 @@ namespace VXGI
 
                 vxgi.pre_clear = false;
             }
+
+            {
+                uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
+
+                VolumeBuffer radiances[2] = { vxgi.prev_radiance, vxgi.radiance };
+
+                VolumeBuffer curRadiance = radiances[FrameIndex % 2];
+                VolumeBuffer prevRadiance = radiances[(FrameIndex + 1) % 2];
+
+                if (!m_VXGITemporalSRVs.IsNull())
+                {
+                    uint32_t DestCount = 2;
+                    uint32_t SourceCounts[] = { 1, 1 };
+                    D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+                    {
+                        prevRadiance.GetSRV(),
+                        vxgi.render_atomic.GetSRV()
+                    };
+                    g_Device->CopyDescriptors(1, &m_VXGITemporalSRVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                }
+                if (!m_VXGITemporalUAVs.IsNull())
+                {
+                    uint32_t DestCount = 2;
+                    uint32_t SourceCounts[] = { 1, 1 };
+                    D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+                    {
+                        curRadiance.GetUAV(),
+                        vxgi.sdf.GetUAV()
+                    };
+                    g_Device->CopyDescriptors(1, &m_VXGITemporalUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                }
+
+            }
         }
     };
 }
@@ -710,6 +774,7 @@ namespace Sponza
     GraphicsPSO m_CutoutShadowPSO(L"Sponza: Cutout Shadow PSO");
     GraphicsPSO m_VoxelPSO(L"Sponza: Voxel PSO");
     GraphicsPSO m_CutoutVoxelPSO(L"Sponza: Cutout Voxel PSO");
+    ComputePSO m_VXGITemporalPSO(L"Sponza: VXGI Temporal PSO");
 
     VXGI::InnerScene m_Scene;
 
@@ -823,6 +888,10 @@ void Sponza::Startup( Camera& Camera )
     m_CutoutVoxelPSO = m_VoxelPSO;
     m_CutoutModelPSO.SetRasterizerState(RasterizerTwoSided);
     m_CutoutModelPSO.Finalize();
+
+    m_VXGITemporalPSO.SetRootSignature(Renderer::m_VoxelRootSig);
+    m_VXGITemporalPSO.SetComputeShader(g_pVXGITemporalCS, sizeof(g_pVXGITemporalCS));
+	m_VXGITemporalPSO.Finalize();
 
     m_Scene.Startup();
 
@@ -1179,11 +1248,23 @@ void Sponza::RenderScene(
         }
 
         {
+            ComputeContext& cpContext = gfxContext.GetComputeContext();
+
             ScopedTimer _prof(L"Temporal Blend Voxels", gfxContext);
 
+            cpContext.SetRootSignature(Renderer::m_VoxelRootSig);
+            cpContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
+            
+            cpContext.SetDescriptorTable(3, VXGI::m_CommonBuffers);
+            cpContext.SetDescriptorTable(4, VXGI::m_VXGITemporalSRVs);
+            cpContext.SetDescriptorTable(6, VXGI::m_VXGITemporalUAVs);
 
+            cpContext.SetPipelineState(m_VXGITemporalPSO);
 
+            cpContext.Dispatch3D(m_Scene.vxgi.res, m_Scene.vxgi.res, m_Scene.vxgi.res, 8, 8, 8);
 
+            cpContext.TransitionResource(m_Scene.vxgi.sdf, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+            cpContext.TransitionResource(m_Scene.vxgi.radiance, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
         }
 
         {

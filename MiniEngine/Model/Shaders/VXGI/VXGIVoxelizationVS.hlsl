@@ -18,9 +18,13 @@ struct VSConstants
 
 ConstantBuffer<VSConstants> m_xVSConstants : register(b0);
 
-CONSTANTBUFFER(g_xVoxelizer, VoxelizerCB, CBSLOT_RENDERER_VOXELIZER);
-CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
-CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
+ConstantBuffer<VoxelizerCB> g_xVoxelizer : register(b0, space1);
+ConstantBuffer<FrameCB> g_xFrame : register(b1, space1);
+ConstantBuffer<CameraCB> g_xCamera : register(b2, space1);
+
+//CONSTANTBUFFER(g_xVoxelizer, VoxelizerCB, CBSLOT_RENDERER_VOXELIZER);
+//CONSTANTBUFFER(g_xFrame, FrameCB, CBSLOT_RENDERER_FRAME);
+//CONSTANTBUFFER(g_xCamera, CameraCB, CBSLOT_RENDERER_CAMERA);
 
 float4x4 getModelMatrix()
 {

@@ -44,7 +44,7 @@ inline float4 SampleVoxelClipMap(in ConstantBuffer<FrameCB> xFrame, in Texture3D
 // coneDirection:	world-space cone direction in the direction to perform the trace
 // coneAperture:	cone width
 // precomputed_direction : avoid 3x anisotropic weight sampling, and instead directly use a slice that has precomputed cone direction weighted data
-inline float4 ConeTrace(in ConstantBuffer<FrameCB> xFrame, in Texture3D<float4> voxels, in Texture3D<float> texture_sdf, in float3 P, in float3 N, in float3 coneDirection, in float coneAperture, in float stepSize, bool use_sdf = false, uint precomputed_direction = 0)
+inline float4 ConeTrace(in ConstantBuffer<FrameCB> xFrame, in Texture3D<float4> voxels, in Texture3D<float> texture_sdf, in float3 P, in float3 N, in float3 coneDirection, in float coneAperture, in float stepSize, uint precomputed_direction = 0)
 {
 	float3 color = 0;
 	float alpha = 0;
@@ -104,7 +104,6 @@ inline float4 ConeTrace(in ConstantBuffer<FrameCB> xFrame, in Texture3D<float4> 
 		alpha += a * sam.a;
 
 		float stepSizeCurrent = stepSize;
-		if (use_sdf)
 		{
 			// half texel correction is applied to avoid sampling over current clipmap:
             const float half_texel = 0.5 * xFrame.vxgi.resolution_rcp;
@@ -126,7 +125,82 @@ inline float4 ConeTrace(in ConstantBuffer<FrameCB> xFrame, in Texture3D<float4> 
 // voxels:			3D Texture containing voxel scene with direct diffuse lighting (or direct + secondary indirect bounce)
 // P:				world-space position of receiving surface
 // N:				world-space normal vector of receiving surface
-inline float4 ConeTraceDiffuse(in ConstantBuffer<FrameCB> xFrame, in Texture3D<float4> voxels, in Texture3D<float> texture_sdf, in float3 P, in float3 N)
+// coneDirection:	world-space cone direction in the direction to perform the trace
+// coneAperture:	cone width
+// precomputed_direction : avoid 3x anisotropic weight sampling, and instead directly use a slice that has precomputed cone direction weighted data
+inline float4 ConeTraceWithoutSDF(in ConstantBuffer<FrameCB> xFrame, in Texture3D<float4> voxels, in float3 P, in float3 N, in float3 coneDirection, in float coneAperture, in float stepSize, uint precomputed_direction = 0)
+{
+	float3 color = 0;
+	float alpha = 0;
+
+	uint clipmap_index0 = 0;
+    VoxelClipMap clipmap0 = xFrame.vxgi.clipmaps[clipmap_index0];
+	const float voxelSize0 = clipmap0.voxelSize * 2; // full extent
+	const float voxelSize0_rcp = rcp(voxelSize0);
+
+	const float coneCoefficient = 2 * tan(coneAperture * 0.5);
+	
+	// We need to offset the cone start position to avoid sampling its own voxel (self-occlusion):
+	float dist = voxelSize0; // offset by cone dir so that first sample of all cones are not the same
+	float step_dist = dist;
+	float3 startPos = P + N * voxelSize0;
+
+	float3 aniso_direction = -coneDirection;
+	float3 face_offsets = float3(
+		aniso_direction.x > 0 ? 0 : 1,
+		aniso_direction.y > 0 ? 2 : 3,
+		aniso_direction.z > 0 ? 4 : 5
+	) / (6.0 + DIFFUSE_CONE_COUNT);
+	float3 direction_weights = abs(coneDirection);
+	//float3 direction_weights = sqr(coneDirection);
+
+	// We will break off the loop if the sampling distance is too far for performance reasons:
+    while (dist < xFrame.vxgi.max_distance && alpha < 1 && clipmap_index0 < VXGI_CLIPMAP_COUNT)
+	{
+		float3 p0 = startPos + coneDirection * dist;
+
+		float diameter = max(voxelSize0, coneCoefficient * dist);
+		float lod = clamp(log2(diameter * voxelSize0_rcp), clipmap_index0, VXGI_CLIPMAP_COUNT - 1);
+
+		float clipmap_index = floor(lod);
+		float clipmap_blend = frac(lod);
+
+        VoxelClipMap clipmap = xFrame.vxgi.clipmaps[clipmap_index];
+        float3 tc = xFrame.vxgi.world_to_clipmap(p0, clipmap);
+		if (!is_saturated(tc))
+		{
+			clipmap_index0++;
+			continue;
+		}
+
+		// sample first clipmap level:
+        float4 sam = SampleVoxelClipMap(xFrame, voxels, p0, clipmap_index, step_dist, face_offsets, direction_weights, precomputed_direction);
+
+		// sample second clipmap if needed and perform trilinear blend:
+		if(clipmap_blend > 0 && clipmap_index < VXGI_CLIPMAP_COUNT - 1)
+		{
+            sam = lerp(sam, SampleVoxelClipMap(xFrame, voxels, p0, clipmap_index + 1, step_dist, face_offsets, direction_weights, precomputed_direction), clipmap_blend);
+        }
+
+		// front-to back blending:
+		float a = 1 - alpha;
+		color += a * sam.rgb;
+		alpha += a * sam.a;
+
+		float stepSizeCurrent = stepSize;
+		step_dist = diameter * stepSizeCurrent;
+
+		// step along ray:
+		dist += step_dist;
+	}
+
+	return float4(color, alpha);
+}
+
+// voxels:			3D Texture containing voxel scene with direct diffuse lighting (or direct + secondary indirect bounce)
+// P:				world-space position of receiving surface
+// N:				world-space normal vector of receiving surface
+inline float4 ConeTraceDiffuse(in ConstantBuffer<FrameCB> xFrame, in Texture3D<float4> voxels, in float3 P, in float3 N)
 {
 	float4 amount = 0;
 
@@ -138,7 +212,7 @@ inline float4 ConeTraceDiffuse(in ConstantBuffer<FrameCB> xFrame, in Texture3D<f
 		if (cosTheta <= 0)
 			continue;
 		const uint precomputed_direction = 6 + i; // optimization, avoids sampling 3 times aniso weights
-        amount += ConeTrace(xFrame, voxels, texture_sdf, P, N, coneDirection, DIFFUSE_CONE_APERTURE, 1, false, precomputed_direction) * cosTheta;
+        amount += ConeTraceWithoutSDF(xFrame, voxels, P, N, coneDirection, DIFFUSE_CONE_APERTURE, 1, precomputed_direction) * cosTheta;
 		sum += cosTheta;
 	}
 	amount /= sum;

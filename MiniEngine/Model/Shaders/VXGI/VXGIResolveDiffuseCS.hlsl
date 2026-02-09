@@ -36,7 +36,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 	const float3 N = decode_oct(texture_normal.SampleLevel(sampler_point_clamp, uv, 0).xy);
 	const float3 P = reconstruct_position(uv, depth, getInverseViewProj());
 
-    float4 trace = ConeTraceDiffuse(g_xFrame, texture_radiance, texture_sdf, P, N);
+    float4 trace = ConeTraceDiffuse(g_xFrame, texture_radiance, P, N);
 	float4 color = float4(trace.rgb, 1);
 	//color.rgb += GetAmbient(N) * (1 - trace.a);
 	
